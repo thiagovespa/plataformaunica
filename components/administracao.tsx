@@ -31,6 +31,7 @@ import {
   Plus,
   AlertTriangle,
   Building2,
+  AlertCircle,
 } from "lucide-react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Calendar } from "@/components/ui/calendar"
@@ -51,6 +52,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { Checkbox } from "@/components/ui/checkbox"
+import { ScrollArea } from "@/components/ui/scroll-area"
 
 const DateInputBrazilian = ({
   value,
@@ -293,6 +295,12 @@ export function Administracao({
   const [pagadoresSetPreview, setPagadoresSetPreview] = useState<Set<string>>(new Set())
   const [credoresSetPreview, setCredoresSetPreview] = useState<Set<string>>(new Set())
 
+  const [errosImportacao, setErrosImportacao] = useState<{
+    tipo: "pagadores" | "credores" | "mapa"
+    erros: string[]
+  } | null>(null)
+  const [showErrosModal, setShowErrosModal] = useState(false)
+
   const fileInputPagadores = useRef<HTMLInputElement>(null)
   const fileInputCredores = useRef<HTMLInputElement>(null)
   const fileInputMapa = useRef<HTMLInputElement>(null)
@@ -447,6 +455,18 @@ export function Administracao({
     setExpandedCredores(false) // Collapse inline card on cancel
   }
 
+  const validarCNPJ = (cnpj: string): boolean => {
+    const cnpjLimpo = cnpj.replace(/[^\d]/g, "")
+    return cnpjLimpo.length === 14
+  }
+
+  const validarCampoObrigatorio = (valor: string, nomeCampo: string): string | null => {
+    if (!valor || valor.trim() === "") {
+      return `Campo "${nomeCampo}" é obrigatório`
+    }
+    return null
+  }
+
   const importarPagadores = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -456,22 +476,63 @@ export function Administracao({
       const text = event.target?.result as string
       const lines = text.split("\n").filter((line) => line.trim())
       const newPagadores: Pagador[] = []
+      const erros: string[] = []
+
+      if (lines.length < 2) {
+        erros.push("Arquivo deve conter cabeçalho e pelo menos uma linha de dados")
+        setErrosImportacao({ tipo: "pagadores", erros })
+        setShowErrosModal(true)
+        e.target.value = ""
+        return
+      }
 
       for (let i = 1; i < lines.length; i++) {
         const cols = lines[i].split(";")
-        if (cols.length >= 5) {
+        const linha = i + 1
+
+        if (cols.length < 5) {
+          erros.push(`Linha ${linha}: Número de colunas insuficiente (esperado: 5, encontrado: ${cols.length})`)
+          continue
+        }
+
+        const codigo = cols[0]?.trim() || ""
+        const agente = cols[1]?.trim() || ""
+        const razaoSocial = cols[2]?.trim() || ""
+        const cnpj = cols[3]?.trim() || ""
+        const dataPagamentoPrevista = cols[4]?.trim() || ""
+
+        if (!codigo) erros.push(`Linha ${linha}: Código é obrigatório`)
+        if (!razaoSocial) erros.push(`Linha ${linha}: Razão Social é obrigatória`)
+        if (!cnpj) {
+          erros.push(`Linha ${linha}: CNPJ é obrigatório`)
+        } else if (!validarCNPJ(cnpj)) {
+          erros.push(`Linha ${linha}: CNPJ inválido "${cnpj}" (deve ter 14 dígitos)`)
+        }
+
+        if (codigo && razaoSocial && cnpj && validarCNPJ(cnpj)) {
           newPagadores.push({
             id: `pag-${i}`,
-            codigo: cols[0]?.trim() || "",
-            agente: cols[1]?.trim() || "",
-            razaoSocial: cols[2]?.trim() || "",
-            cnpj: cols[3]?.trim() || "",
-            dataPagamentoPrevista: cols[4]?.trim() || "",
+            codigo,
+            agente,
+            razaoSocial,
+            cnpj,
+            dataPagamentoPrevista,
           })
         }
       }
 
-      setPagadores(newPagadores)
+      if (erros.length > 0) {
+        setErrosImportacao({ tipo: "pagadores", erros })
+        setShowErrosModal(true)
+      }
+
+      if (newPagadores.length > 0) {
+        setPagadores(newPagadores)
+      } else if (erros.length > 0) {
+        // Don't import anything if all rows have errors
+        e.target.value = ""
+        return
+      }
     }
     reader.readAsText(file)
     e.target.value = ""
@@ -486,25 +547,68 @@ export function Administracao({
       const text = event.target?.result as string
       const lines = text.split("\n").filter((line) => line.trim())
       const newCredores: CredorBase[] = []
+      const erros: string[] = []
+
+      if (lines.length < 2) {
+        erros.push("Arquivo deve conter cabeçalho e pelo menos uma linha de dados")
+        setErrosImportacao({ tipo: "credores", erros })
+        setShowErrosModal(true)
+        e.target.value = ""
+        return
+      }
 
       for (let i = 1; i < lines.length; i++) {
         const cols = lines[i].split(";")
-        if (cols.length >= 8) {
+        const linha = i + 1
+
+        if (cols.length < 8) {
+          erros.push(`Linha ${linha}: Número de colunas insuficiente (esperado: 8, encontrado: ${cols.length})`)
+          continue
+        }
+
+        const codigo = cols[0]?.trim() || ""
+        const agente = cols[1]?.trim() || ""
+        const nome = cols[2]?.trim() || ""
+        const documento = cols[3]?.trim() || ""
+        const banco = cols[4]?.trim() || ""
+        const agencia = cols[5]?.trim() || ""
+        const conta = cols[6]?.trim() || ""
+        const formasRecebimento = cols[7]?.trim() || ""
+
+        if (!codigo) erros.push(`Linha ${linha}: Código é obrigatório`)
+        if (!nome) erros.push(`Linha ${linha}: Nome é obrigatório`)
+        if (!documento) {
+          erros.push(`Linha ${linha}: Documento (CNPJ) é obrigatório`)
+        } else if (!validarCNPJ(documento)) {
+          erros.push(`Linha ${linha}: Documento inválido "${documento}" (deve ter 14 dígitos)`)
+        }
+
+        if (codigo && nome && documento && validarCNPJ(documento)) {
           newCredores.push({
             id: `cred-${i}`,
-            codigo: cols[0]?.trim() || "",
-            agente: cols[1]?.trim() || "",
-            nome: cols[2]?.trim() || "",
-            documento: cols[3]?.trim() || "",
-            banco: cols[4]?.trim() || "",
-            agencia: cols[5]?.trim() || "",
-            conta: cols[6]?.trim() || "",
-            formasRecebimento: cols[7]?.trim() || "",
+            codigo,
+            agente,
+            nome,
+            documento,
+            banco,
+            agencia,
+            conta,
+            formasRecebimento,
           })
         }
       }
 
-      setCredoresBase(newCredores)
+      if (erros.length > 0) {
+        setErrosImportacao({ tipo: "credores", erros })
+        setShowErrosModal(true)
+      }
+
+      if (newCredores.length > 0) {
+        setCredoresBase(newCredores)
+      } else if (erros.length > 0) {
+        e.target.value = ""
+        return
+      }
     }
     reader.readAsText(file)
     e.target.value = ""
@@ -527,10 +631,26 @@ export function Administracao({
     reader.onload = (event) => {
       const text = event.target?.result as string
       const lines = text.split("\n").filter((line) => line.trim())
+      const erros: string[] = []
 
-      if (lines.length < 2) return
+      if (lines.length < 2) {
+        erros.push("Arquivo deve conter cabeçalho e pelo menos uma linha de dados")
+        setErrosImportacao({ tipo: "mapa", erros })
+        setShowErrosModal(true)
+        e.target.value = ""
+        return
+      }
 
       const headers = lines[0].split(";")
+
+      if (headers.length < 2) {
+        erros.push("Cabeçalho deve conter pelo menos uma coluna de pagador e uma de credor")
+        setErrosImportacao({ tipo: "mapa", erros })
+        setShowErrosModal(true)
+        e.target.value = ""
+        return
+      }
+
       const credorCodigos = headers.slice(1)
 
       const newMapa: MapaLiquidacao[] = []
@@ -542,16 +662,29 @@ export function Administracao({
 
       for (let i = 1; i < lines.length; i++) {
         const cols = lines[i].split(";")
+        const linha = i + 1
         const pagadorCodigo = cols[0]?.trim() || ""
+
+        if (!pagadorCodigo) {
+          erros.push(`Linha ${linha}: Código do pagador é obrigatório`)
+          continue
+        }
+
         pagadoresSet.add(pagadorCodigo)
 
         const codigoPagadorBase = pagadorCodigo.split(/\s*[-–]\s*/)[0].trim()
         pagadorOcorrencias[codigoPagadorBase] = (pagadorOcorrencias[codigoPagadorBase] || 0) + 1
 
+        let temValorValido = false
         for (let j = 1; j < cols.length; j++) {
           const valorStr = cols[j]?.trim() || "0"
           const valorNormalizado = valorStr.replace(/\./g, "").replace(",", ".")
           const valor = Number.parseFloat(valorNormalizado)
+
+          if (valorStr && valorStr !== "0" && isNaN(valor)) {
+            erros.push(`Linha ${linha}, Coluna ${j + 1}: Valor "${valorStr}" não é um número válido`)
+            continue
+          }
 
           if (valor > 0 && credorCodigos[j - 1]) {
             const credorCodigo = credorCodigos[j - 1].trim()
@@ -567,7 +700,13 @@ export function Administracao({
               credorCodigo,
               valor,
             })
+            temValorValido = true
           }
+        }
+
+        if (!temValorValido && cols.length > 1) {
+          // This is just a warning, not an error
+          // erros.push(`Linha ${linha}: Nenhum valor positivo encontrado para o pagador "${pagadorCodigo}"`)
         }
       }
 
@@ -578,6 +717,19 @@ export function Administracao({
           .trim()
         credorOcorrencias[codigoCredorBase] = (credorOcorrencias[codigoCredorBase] || 0) + 1
       })
+
+      if (erros.length > 0) {
+        setErrosImportacao({ tipo: "mapa", erros })
+        setShowErrosModal(true)
+      }
+
+      if (newMapa.length === 0) {
+        erros.push("Nenhum registro válido encontrado no arquivo")
+        setErrosImportacao({ tipo: "mapa", erros })
+        setShowErrosModal(true)
+        e.target.value = ""
+        return
+      }
 
       const dupPagadores = Object.entries(pagadorOcorrencias)
         .filter(([_, count]) => count > 1)
@@ -2016,204 +2168,39 @@ export function Administracao({
         </DialogContent>
       </Dialog>
 
-      {/* Modal for adding new pagador */}
-      <Dialog
-        open={showNovoPagador}
-        onOpenChange={(isOpen) => {
-          setShowNovoPagador(isOpen)
-          if (!isOpen) {
-            handleCancelarPagador() // Reset form when modal closes
-          }
-        }}
-      >
-        <DialogContent>
+      <Dialog open={showErrosModal} onOpenChange={setShowErrosModal}>
+        <DialogContent className="max-w-2xl max-h-[80vh]">
           <DialogHeader>
-            <DialogTitle>{editingPagadorId ? "Editar Pagador" : "Novo Pagador"}</DialogTitle>
-            <DialogDescription>Preencha os dados do novo pagador.</DialogDescription>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="h-5 w-5" />
+              Erros na Importação de{" "}
+              {errosImportacao?.tipo === "pagadores"
+                ? "Pagadores"
+                : errosImportacao?.tipo === "credores"
+                  ? "Credores"
+                  : "Mapa de Liquidação"}
+            </DialogTitle>
+            <DialogDescription>
+              Foram encontrados {errosImportacao?.erros.length || 0} erro(s) durante a validação do arquivo.
+            </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="codigo" className="text-right">
-                Código
-              </Label>
-              <Input
-                id="codigo"
-                value={novoPagador.codigo}
-                onChange={(e) => setNovoPagador({ ...novoPagador, codigo: e.target.value })}
-                className="col-span-3"
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="agente" className="text-right">
-                Agente
-              </Label>
-              <Input
-                id="agente"
-                value={novoPagador.agente}
-                onChange={(e) => setNovoPagador({ ...novoPagador, agente: e.target.value })}
-                className="col-span-3"
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="razaoSocial" className="text-right">
-                Razão Social
-              </Label>
-              <Input
-                id="razaoSocial"
-                value={novoPagador.razaoSocial}
-                onChange={(e) => setNovoPagador({ ...novoPagador, razaoSocial: e.target.value })}
-                className="col-span-3"
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="cnpj" className="text-right">
-                CNPJ
-              </Label>
-              <Input
-                id="cnpj"
-                value={novoPagador.cnpj}
-                onChange={(e) => setNovoPagador({ ...novoPagador, cnpj: formatCnpjInput(e.target.value) })}
-                className="col-span-3"
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="dataPagamentoPrevista" className="text-right">
-                Data Prevista
-              </Label>
-              <div className="col-span-3">
-                <DateInputBrazilian
-                  value={novoPagador.dataPagamentoPrevista}
-                  onChange={(date) => setNovoPagador({ ...novoPagador, dataPagamentoPrevista: date })}
-                />
-              </div>
-            </div>
-          </div>
-          <DialogFooter>
-            {editingPagadorId && (
-              <Button variant="outline" onClick={handleCancelarPagador}>
-                Cancelar Edição
-              </Button>
-            )}
-            <Button type="submit" onClick={handleSalvarPagador}>
-              {editingPagadorId ? "Salvar Alterações" : "Adicionar Pagador"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
-      {/* Modal for adding new credor */}
-      <Dialog
-        open={showNovoCredor}
-        onOpenChange={(isOpen) => {
-          setShowNovoCredor(isOpen)
-          if (!isOpen) {
-            handleCancelarCredor() // Reset form when modal closes
-          }
-        }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{editingCredorId ? "Editar Credor" : "Novo Credor"}</DialogTitle>
-            <DialogDescription>Preencha os dados do novo credor.</DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="codigo" className="text-right">
-                Código
-              </Label>
-              <Input
-                id="codigo"
-                value={novoCredor.codigo}
-                onChange={(e) => setNovoCredor({ ...novoCredor, codigo: e.target.value })}
-                className="col-span-3"
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="agente" className="text-right">
-                Agente
-              </Label>
-              <Input
-                id="agente"
-                value={novoCredor.agente}
-                onChange={(e) => setNovoCredor({ ...novoCredor, agente: e.target.value })}
-                className="col-span-3"
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="nome" className="text-right">
-                Nome
-              </Label>
-              <Input
-                id="nome"
-                value={novoCredor.nome}
-                onChange={(e) => setNovoCredor({ ...novoCredor, nome: e.target.value })}
-                className="col-span-3"
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="documento" className="text-right">
-                Documento
-              </Label>
-              <Input
-                id="documento"
-                value={novoCredor.documento}
-                onChange={(e) => setNovoCredor({ ...novoCredor, documento: formatCnpjInput(e.target.value) })}
-                className="col-span-3"
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="banco" className="text-right">
-                Banco
-              </Label>
-              <Input
-                id="banco"
-                value={novoCredor.banco}
-                onChange={(e) => setNovoCredor({ ...novoCredor, banco: e.target.value })}
-                className="col-span-3"
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="agencia" className="text-right">
-                Agência
-              </Label>
-              <Input
-                id="agencia"
-                value={novoCredor.agencia}
-                onChange={(e) => setNovoCredor({ ...novoCredor, agencia: e.target.value })}
-                className="col-span-3"
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="conta" className="text-right">
-                Conta
-              </Label>
-              <Input
-                id="conta"
-                value={novoCredor.conta}
-                onChange={(e) => setNovoCredor({ ...novoCredor, conta: e.target.value })}
-                className="col-span-3"
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="formasRecebimento" className="text-right">
-                Formas Recebimento
-              </Label>
-              <Input
-                id="formasRecebimento"
-                value={novoCredor.formasRecebimento}
-                onChange={(e) => setNovoCredor({ ...novoCredor, formasRecebimento: e.target.value })}
-                className="col-span-3"
-              />
-            </div>
+          <div className="py-4">
+            <ScrollArea className="h-[400px] pr-4">
+              <div className="space-y-2">
+                {errosImportacao?.erros.map((erro, idx) => (
+                  <div key={idx} className="flex items-start gap-2 p-2 bg-destructive/10 rounded-md text-sm">
+                    <AlertCircle className="h-4 w-4 text-destructive mt-0.5 shrink-0" />
+                    <span>{erro}</span>
+                  </div>
+                ))}
+              </div>
+            </ScrollArea>
           </div>
+
           <DialogFooter>
-            {editingCredorId && (
-              <Button variant="outline" onClick={handleCancelarCredor}>
-                Cancelar Edição
-              </Button>
-            )}
-            <Button type="submit" onClick={handleSalvarCredor}>
-              {editingCredorId ? "Salvar Alterações" : "Adicionar Credor"}
+            <Button variant="outline" onClick={() => setShowErrosModal(false)}>
+              Fechar
             </Button>
           </DialogFooter>
         </DialogContent>
