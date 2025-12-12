@@ -4736,27 +4736,7 @@ export function ConciliadorInteligente({
       </Dialog>
 
       {/* Added the main header with new actions */}
-      <div className="flex justify-between items-center">
-        <h2 className="text-3xl font-bold">Conciliador Inteligente</h2>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={() => setShowAuditoria(true)}>
-            <FileText className="h-4 w-4 mr-2" />
-            Trilha de Auditoria ({auditoriaEventos.length})
-          </Button>
-          <Button variant="outline" onClick={() => setShowNovoPagamento(true)}>
-            <Plus className="h-4 w-4 mr-2" />
-            Novo Pagamento
-          </Button>
-          <Button variant="outline" onClick={() => setShowImportarArquivo(true)}>
-            <Upload className="h-4 w-4 mr-2" />
-            Importar Arquivo
-          </Button>
-          <Button onClick={handleReconciliarAutomaticamente}>
-            <CheckCircle className="h-4 w-4 mr-2" />
-            Reconciliar Automaticamente
-          </Button>
-        </div>
-      </div>
+      
 
       {/* ... rest of the component ... */}
     </div>
