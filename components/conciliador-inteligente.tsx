@@ -38,6 +38,7 @@ import {
   ArrowUpDown,
   ChevronRight,
   Download,
+  CheckCircle,
 } from "lucide-react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Calendar } from "@/components/ui/calendar"
@@ -175,6 +176,31 @@ interface Pagamento {
   codigoPagador?: string // The code of the pagador from MapaLiquidacao
   numeroONS?: string // From NumeroONS in details or input
   valorConciliado?: number // Added for tracking reconciled value
+}
+
+interface AuditoriaEvento {
+  id: string
+  timestamp: string
+  usuario: string
+  acao:
+    | "importacao"
+    | "conciliacao_manual"
+    | "conciliacao_automatica"
+    | "exclusao"
+    | "criacao_manual"
+    | "edicao"
+    | "analise_excecao"
+  descricao: string
+  pagamentoId?: string
+  detalhes?: {
+    valorAnterior?: number
+    valorNovo?: number
+    statusAnterior?: string
+    statusNovo?: string
+    cnpj?: string
+    codigo?: string
+    [key: string]: any
+  }
 }
 
 const formatToBrazilian = (value: number | undefined | null): string => {
@@ -757,6 +783,27 @@ export function ConciliadorInteligente({
   >([])
   const [conciliarTipo, setConciliarTipo] = useState<Pagamento["tipo"]>("igual")
 
+  const [auditoriaEventos, setAuditoriaEventos] = useState<AuditoriaEvento[]>([])
+  const [showAuditoria, setShowAuditoria] = useState(false)
+
+  const adicionarEventoAuditoria = (
+    acao: AuditoriaEvento["acao"],
+    descricao: string,
+    pagamentoId?: string,
+    detalhes?: AuditoriaEvento["detalhes"],
+  ) => {
+    const novoEvento: AuditoriaEvento = {
+      id: `audit-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+      timestamp: new Date().toISOString(),
+      usuario: "Usuário Atual", // In a real app, this would come from auth context
+      acao,
+      descricao,
+      pagamentoId,
+      detalhes,
+    }
+    setAuditoriaEventos((prev) => [novoEvento, ...prev])
+  }
+
   const abrirConciliarModal = (pagamento: Pagamento) => {
     setPagamentoConciliar(pagamento)
 
@@ -811,6 +858,17 @@ export function ConciliadorInteligente({
     setConciliarSelecionados(pagadoresComSelecao)
     setConciliarTipo(pagamento.tipo || "igual")
     setShowConciliarModal(true)
+
+    adicionarEventoAuditoria(
+      "analise_excecao",
+      `Abriu modal de conciliação para pagamento ${pagamento.pagador}`,
+      pagamento.id,
+      {
+        valor: pagamento.valor,
+        cnpj: pagamento.cnpj,
+        codigo: pagamento.codigo,
+      },
+    )
   }
 
   const confirmarConciliacao = () => {
@@ -901,6 +959,22 @@ export function ConciliadorInteligente({
     setShowConciliarModal(false)
     setPagamentoConciliar(null)
     setConciliarSelecionados([])
+
+    adicionarEventoAuditoria(
+      "conciliacao_manual",
+      `Conciliou pagamento ${pagamentoConciliar.pagador} (${tipoFinal}) com ${selecionados.length} pagador(es)`,
+      pagamentoConciliar.id,
+      {
+        statusAnterior: pagamentoConciliar.status,
+        statusNovo: "conciliado",
+        tipo: tipoFinal,
+        pagadoresSelecionados: selecionados.map((s) => ({
+          codigo: s.codigo,
+          cnpj: s.cnpj,
+          valor: s.valorAssociado,
+        })),
+      },
+    )
   }
 
   useEffect(() => {
@@ -914,11 +988,32 @@ export function ConciliadorInteligente({
   }, [pagamentos, onEstatisticasChange])
 
   const handleRemoverPagamento = (id: string) => {
+    const pagamento = pagamentos.find((p) => p.id === id)
+    if (pagamento) {
+      adicionarEventoAuditoria("exclusao", `Solicitou exclusão do pagamento ${pagamento.pagador}`, id, {
+        valor: pagamento.valor,
+        cnpj: pagamento.cnpj,
+        status: pagamento.status,
+      })
+    }
     setPagamentoParaRemover(id)
   }
 
   const confirmarRemocao = () => {
     if (pagamentoParaRemover) {
+      const pagamento = pagamentos.find((p) => p.id === pagamentoParaRemover)
+      if (pagamento) {
+        adicionarEventoAuditoria(
+          "exclusao",
+          `Excluiu pagamento ${pagamento.pagador} - R$ ${pagamento.valor.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`,
+          pagamentoParaRemover,
+          {
+            valor: pagamento.valor,
+            cnpj: pagamento.cnpj,
+            status: pagamento.status,
+          },
+        )
+      }
       setPagamentos(pagamentos.filter((p) => p.id !== pagamentoParaRemover))
       setPagamentoParaRemover(null)
     }
@@ -943,6 +1038,11 @@ export function ConciliadorInteligente({
 
   const confirmarRemocaoTodos = () => {
     const idsFiltrados = pagamentosFiltrados.map((p) => p.id)
+    adicionarEventoAuditoria("exclusao", `Excluiu ${idsFiltrados.length} pagamento(s) em massa`, undefined, {
+      quantidade: idsFiltrados.length,
+      filtroStatus,
+      filtroOrigem,
+    })
     setPagamentos(pagamentos.filter((p) => !idsFiltrados.includes(p.id)))
     setShowRemoverTodos(false)
   }
@@ -1298,6 +1398,18 @@ export function ConciliadorInteligente({
         status: statusCalculado,
       },
     }
+
+    adicionarEventoAuditoria(
+      "criacao_manual",
+      `Criou pagamento manual para ${pagadorEncontrado?.razaoSocial || novoPagamentoFormData.cnpj}`,
+      novoPagamento.id,
+      {
+        valor: novoPagamento.valor,
+        cnpj: novoPagamento.cnpj,
+        codigo: novoPagamento.codigo,
+        formaPagamento: novoPagamento.formaPagamento,
+      },
+    )
 
     setPagamentos((prev) => [...prev, novoPagamento])
     setShowNovoPagamento(false)
@@ -1835,6 +1947,20 @@ export function ConciliadorInteligente({
           : p,
       ),
     )
+
+    // Added audit log for editing
+    adicionarEventoAuditoria(
+      "edicao",
+      `Editou detalhes do pagamento ${pagamentoSelecionado.pagador}`,
+      pagamentoSelecionado.id,
+      {
+        statusAnterior: pagamentoSelecionado.status,
+        statusNovo: (detalhesEditados as any).status || pagamentoSelecionado.status,
+        valorAnterior: pagamentoSelecionado.valor,
+        valorNovo: detalhesEditados.valorFinal,
+      },
+    )
+
     setShowDetalhes(false)
   }
 
@@ -2111,6 +2237,17 @@ export function ConciliadorInteligente({
   const confirmarImportacao = () => {
     if (importacaoPreview.length === 0) return
 
+    adicionarEventoAuditoria(
+      "importacao",
+      `Iniciou importação de ${importacaoPreview.length} pagamento(s) do arquivo ${nomeArquivoSelecionado}`,
+      undefined,
+      {
+        quantidade: importacaoPreview.length,
+        tipoArquivo,
+        nomeArquivo: nomeArquivoSelecionado,
+      },
+    )
+
     const processedPayments: { cnpj: string; valor: number; data: string }[] = []
 
     const novosPagamentos = importacaoPreview.map((p) => {
@@ -2200,21 +2337,370 @@ export function ConciliadorInteligente({
     })
 
     setPagamentos((prev) => [...prev, ...novosPagamentos])
-    setImportacaoPreview([])
+
+    const statusCount = novosPagamentos.reduce(
+      (acc, p) => {
+        acc[p.status] = (acc[p.status] || 0) + 1
+        return acc
+      },
+      {} as Record<string, number>,
+    )
+
+    adicionarEventoAuditoria(
+      "importacao",
+      `Concluiu importação: ${Object.entries(statusCount)
+        .map(([status, count]) => `${count} ${status}`)
+        .join(", ")}`,
+      undefined,
+      {
+        statusCount,
+        total: novosPagamentos.length,
+      },
+    )
+
     setShowImportarArquivo(false)
+    setImportacaoPreview([])
     setArquivoImportado(null)
     setNomeArquivoSelecionado("")
   }
 
-  const handleAdicionarPagamento = () => {
-    salvarNovoPagamento()
+  const handleCriarPagamento = () => {
+    // Buscar nome do pagador pelo CNPJ
+    const cnpjLimpo = novoPagamentoFormData.cnpj.replace(/\D/g, "")
+    const pagadorEncontrado = pagadores.find((p) => p.cnpj.replace(/\D/g, "") === cnpjLimpo)
+
+    // Parse valor from formatted string
+    const valorRecebido = parseMoedaBRL(novoPagamentoFormData.valorFormatado)
+
+    // Buscar valor esperado do mapa pelo CNPJ
+    const valorEsperado = getValorEsperadoPorCnpj(cnpjLimpo)
+
+    let dataISO = novoPagamentoFormData.data
+    if (novoPagamentoFormData.data.includes("/")) {
+      const partes = novoPagamentoFormData.data.split("/")
+      if (partes.length === 3) {
+        dataISO = `${partes[2]}-${partes[1]}-${partes[0]}`
+      }
+    }
+
+    const isDuplicado = pagamentos.some((p) => {
+      const cnpjExistente = p.cnpj.replace(/\D/g, "")
+      const codigoExistente = p.codigo || ""
+      return (
+        cnpjExistente === cnpjLimpo && codigoExistente === novoPagamentoFormData.codigo && p.valor === valorRecebido
+      )
+    })
+
+    let statusCalculado: Pagamento["status"] = isDuplicado
+      ? "duplicado"
+      : valorRecebido === valorEsperado && valorEsperado > 0
+        ? "conciliado"
+        : valorEsperado > 0
+          ? "divergente"
+          : "excecao"
+
+    // Se conciliado, verificar se é antecipado ou atrasado com base na data de referência
+    if (statusCalculado === "conciliado" && dataReferenciaMapa) {
+      const dataPagamento = new Date(dataISO.includes("T") ? dataISO : `${dataISO}T12:00:00`)
+      const dataReferencia = new Date(dataReferenciaMapa)
+      // Comparar apenas as datas (ignorando horário)
+      dataPagamento.setHours(12, 0, 0, 0)
+      dataReferencia.setHours(12, 0, 0, 0)
+
+      if (dataPagamento.getTime() < dataReferencia.getTime()) {
+        statusCalculado = "antecipado"
+      } else if (dataPagamento.getTime() > dataReferencia.getTime()) {
+        statusCalculado = "atrasado"
+      }
+      // Se for igual, mantém como "conciliado"
+    }
+
+    const novoPagamento: Pagamento = {
+      id: `PAG-${Date.now()}`,
+      codigo: novoPagamentoFormData.codigo, // Nº ONS do formulário
+      data: dataISO, // Usar data convertida
+      pagador: pagadorEncontrado?.razaoSocial || "Pagador não identificado",
+      cnpj: novoPagamentoFormData.cnpj,
+      valor: valorRecebido,
+      valorEsperado: valorEsperado,
+      canal: "",
+      banco: "",
+      identificacao: "",
+      status: statusCalculado,
+      tipo: valorRecebido === valorEsperado ? "igual" : valorRecebido > valorEsperado ? "maior" : "menor",
+      observacao: "",
+      origem: "manual",
+      formaPagamento: novoPagamentoFormData.formaPagamento,
+      detalhes: {
+        id: "",
+        titulo: "",
+        numeroONS: novoPagamentoFormData.codigo, // Nº ONS do formulário
+        transmissora: "",
+        valor: valorRecebido,
+        dataEmissao: "",
+        dataVencimento: "",
+        dataPagamento: dataISO, // Usar data convertida
+        formaPagamento: novoPagamentoFormData.formaPagamento,
+        pagamentoParcialValor: 0,
+        dataPagamentoParcial: "",
+        valorFaltante: 0,
+        jurosMulta: 0,
+        valorFinal: valorRecebido,
+        dataPagamentoRestante: "",
+        chavePix: "",
+        tipoChavePix: "",
+        banco: "",
+        agencia: "",
+        conta: "",
+        tipoConta: "",
+        favorecido: "",
+        cnpjFavorecido: "",
+        codigoBarras: "",
+        linhaDigitavel: "",
+        status: statusCalculado,
+      },
+    }
+
+    adicionarEventoAuditoria(
+      "criacao_manual",
+      `Criou pagamento manual para ${pagadorEncontrado?.razaoSocial || novoPagamentoFormData.cnpj}`,
+      novoPagamento.id,
+      {
+        valor: novoPagamento.valor,
+        cnpj: novoPagamento.cnpj,
+        codigo: novoPagamento.codigo,
+        formaPagamento: novoPagamento.formaPagamento,
+      },
+    )
+
+    setPagamentos((prev) => [...prev, novoPagamento])
+    setShowNovoPagamento(false)
+    resetNovoPagamentoFormData()
+  }
+
+  const handleReconciliarAutomaticamente = () => {
+    const totalAntes = pagamentos.length
+    const statusAntes = pagamentos.reduce(
+      (acc, p) => {
+        acc[p.status] = (acc[p.status] || 0) + 1
+        return acc
+      },
+      {} as Record<string, number>,
+    )
+
+    adicionarEventoAuditoria(
+      "conciliacao_automatica",
+      `Iniciou conciliação automática de ${totalAntes} pagamento(s)`,
+      undefined,
+      {
+        statusAntes,
+      },
+    )
+
+    const novosPagamentos = pagamentos.map((p) => {
+      // Skip already reconciled payments
+      if (p.status === "conciliado") return p
+
+      // Clean CNPJ from payment for comparison
+      const cnpjPagamentoLimpo = p.cnpj.replace(/\D/g, "")
+
+      if (!cnpjPagamentoLimpo) {
+        return { ...p, status: "excecao" as const, tipo: "identificacao_incorreta" as const }
+      }
+
+      // Find pagador by CNPJ in cadastro
+      const pagadorEncontrado = pagadores.find((pag) => pag.cnpj?.replace(/\D/g, "") === cnpjPagamentoLimpo)
+
+      let entradasPagador: typeof mapaLiquidacao = []
+
+      if (pagadorEncontrado) {
+        // 1. Buscar por código do pagador
+        entradasPagador = mapaLiquidacao.filter((m) => {
+          const codigoPagador = m.pagadorCodigo?.split(/\s*[-–]\s*/)[0].trim() || ""
+          return codigoPagador === pagadorEncontrado.codigo
+        })
+      }
+
+      // 2. Se não encontrou, buscar pelo CNPJ diretamente no mapa
+      if (entradasPagador.length === 0) {
+        entradasPagador = mapaLiquidacao.filter((m) => {
+          const mapaCnpj = m.pagadorCodigo?.replace(/\D/g, "") || ""
+          return (
+            mapaCnpj === cnpjPagamentoLimpo ||
+            mapaCnpj.includes(cnpjPagamentoLimpo) ||
+            cnpjPagamentoLimpo.includes(mapaCnpj)
+          )
+        })
+      }
+
+      // 3. Se ainda não encontrou, buscar em todas as entradas do credor pelo valor
+      if (entradasPagador.length === 0) {
+        const valorRecebido = Math.abs(p.valor)
+        entradasPagador = mapaLiquidacao.filter((m) => {
+          const valorMapa = m.valor || 0
+          return Math.abs(valorMapa - valorRecebido) < 0.01
+        })
+      }
+
+      if (entradasPagador.length === 0) {
+        return { ...p, status: "excecao" as const, tipo: "identificacao_incorreta" as const }
+      }
+
+      // Sum all expected values for this pagador (valor a pagar)
+      const valorEsperadoTotal = entradasPagador.reduce((acc, m) => acc + (m.valor || 0), 0)
+      const valorRecebido = Math.abs(p.valor)
+
+      // Compare values with tolerance of 0.01
+      const diferenca = Math.abs(valorRecebido - valorEsperadoTotal)
+      const tolerancia = 0.01
+
+      if (diferenca <= tolerancia) {
+        let status = "conciliado" as const
+        let tipo = "igual" as const
+
+        // Check for atrasado/antecipado status only when conciliado
+        if (status === "conciliado" && dataReferenciaMapa) {
+          const dataPagamento = new Date(p.data.includes("T") ? p.data : p.data + "T12:00:00")
+          const dataReferencia = new Date(dataReferenciaMapa)
+          dataPagamento.setHours(12, 0, 0, 0)
+          dataReferencia.setHours(12, 0, 0, 0)
+
+          if (dataPagamento.getTime() < dataReferencia.getTime()) {
+            status = "antecipado"
+            tipo = "antecipado"
+          } else if (dataPagamento.getTime() > dataReferencia.getTime()) {
+            status = "atrasado"
+            tipo = "atrasado"
+          }
+        }
+
+        return {
+          ...p,
+          valorEsperado: valorEsperadoTotal,
+          status,
+          tipo,
+          valorConciliado: valorRecebido,
+        }
+      } else if (valorRecebido > valorEsperadoTotal) {
+        return {
+          ...p,
+          valorEsperado: valorEsperadoTotal,
+          status: "divergente" as const,
+          tipo: "valor_maior" as const,
+        }
+      } else {
+        return {
+          ...p,
+          valorEsperado: valorEsperadoTotal,
+          status: "divergente" as const,
+          tipo: "valor_menor" as const,
+        }
+      }
+    })
+
+    setPagamentos(novosPagamentos)
+
+    const statusDepois = novosPagamentos.reduce(
+      (acc, p) => {
+        acc[p.status] = (acc[p.status] || 0) + 1
+        return acc
+      },
+      {} as Record<string, number>,
+    )
+
+    const conciliadosNovos = (statusDepois.conciliado || 0) - (statusAntes.conciliado || 0)
+
+    adicionarEventoAuditoria(
+      "conciliacao_automatica",
+      `Concluiu conciliação automática: ${conciliadosNovos} pagamento(s) conciliados`,
+      undefined,
+      {
+        statusDepois,
+        conciliadosNovos,
+      },
+    )
+  }
+
+  const exportarRelatorioAuditoria = () => {
+    const csvContent = [
+      ["Timestamp", "Usuário", "Ação", "Descrição", "Pagamento ID", "Detalhes"].join(";"),
+      ...auditoriaEventos.map((evento) =>
+        [
+          new Date(evento.timestamp).toLocaleString("pt-BR"),
+          evento.usuario,
+          evento.acao,
+          evento.descricao,
+          evento.pagamentoId || "",
+          JSON.stringify(evento.detalhes || {}),
+        ].join(";"),
+      ),
+    ].join("\n")
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement("a")
+    link.href = url
+    link.download = `auditoria-conciliacao-${new Date().toISOString().split("T")[0]}.csv`
+    link.click()
+    setTimeout(() => URL.revokeObjectURL(url), 100)
+  }
+
+  const getAcaoBadgeVariant = (acao: AuditoriaEvento["acao"]) => {
+    switch (acao) {
+      case "importacao":
+        return "default"
+      case "conciliacao_manual":
+      case "conciliacao_automatica":
+        return "default"
+      case "exclusao":
+        return "destructive"
+      case "criacao_manual":
+        return "secondary"
+      case "edicao":
+        return "outline"
+      case "analise_excecao":
+        return "secondary"
+      default:
+        return "default"
+    }
+  }
+
+  const formatarAcaoLabel = (acao: AuditoriaEvento["acao"]) => {
+    const labels = {
+      importacao: "Importação",
+      conciliacao_manual: "Conciliação Manual",
+      conciliacao_automatica: "Conciliação Automática",
+      exclusao: "Exclusão",
+      criacao_manual: "Criação Manual",
+      edicao: "Edição",
+      analise_excecao: "Análise de Exceção",
+    }
+    return labels[acao] || acao
   }
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="font-bold text-3xl">Conciliador Inteligente</h2>
-        <p className="text-muted-foreground">Concilie pagamentos recebidos com os valores esperados</p>
+      {/* Header with Title and Actions */}
+      <div className="flex justify-between items-center">
+        <h2 className="text-3xl font-bold">Conciliador Inteligente</h2>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setShowAuditoria(true)}>
+            <FileText className="h-4 w-4 mr-2" />
+            Trilha de Auditoria ({auditoriaEventos.length})
+          </Button>
+          <Button variant="outline" onClick={() => setShowNovoPagamento(true)}>
+            <Plus className="h-4 w-4 mr-2" />
+            Novo Pagamento
+          </Button>
+          <Button variant="outline" onClick={() => setShowImportarArquivo(true)}>
+            <Upload className="h-4 w-4 mr-2" />
+            Importar Arquivo
+          </Button>
+          <Button onClick={handleReconciliarAutomaticamente}>
+            <CheckCircle className="h-4 w-4 mr-2" />
+            Reconciliar Automaticamente
+          </Button>
+        </div>
       </div>
 
       {/* Seleção de Credor */}
@@ -4146,6 +4632,133 @@ export function ConciliadorInteligente({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={showAuditoria} onOpenChange={setShowAuditoria}>
+        <DialogContent className="max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
+          <DialogHeader className="border-b pb-4">
+            <DialogTitle>Trilha de Auditoria - Conciliação</DialogTitle>
+            <DialogDescription>
+              Histórico completo de todas as operações realizadas no sistema de conciliação
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto p-6">
+            <div className="flex justify-between items-center mb-4">
+              <div className="flex items-center gap-2">
+                <Badge variant="outline">{auditoriaEventos.length} eventos registrados</Badge>
+              </div>
+              <Button variant="outline" size="sm" onClick={exportarRelatorioAuditoria}>
+                <Download className="h-4 w-4 mr-2" />
+                Exportar Relatório
+              </Button>
+            </div>
+
+            <div className="space-y-3">
+              {auditoriaEventos.length === 0 ? (
+                <div className="text-center text-muted-foreground py-12">
+                  <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                  <p>Nenhum evento de auditoria registrado ainda</p>
+                  <p className="text-sm mt-2">Todas as ações realizadas aparecerão aqui</p>
+                </div>
+              ) : (
+                auditoriaEventos.map((evento) => (
+                  <div key={evento.id} className="border rounded-lg p-4 hover:bg-muted/50 transition-colors">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Badge variant={getAcaoBadgeVariant(evento.acao)}>{formatarAcaoLabel(evento.acao)}</Badge>
+                          <span className="text-sm text-muted-foreground">
+                            {new Date(evento.timestamp).toLocaleString("pt-BR", {
+                              day: "2-digit",
+                              month: "2-digit",
+                              year: "numeric",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                              second: "2-digit",
+                            })}
+                          </span>
+                          <span className="text-sm text-muted-foreground">• {evento.usuario}</span>
+                        </div>
+                        <p className="text-sm font-medium mb-2">{evento.descricao}</p>
+                        {evento.detalhes && Object.keys(evento.detalhes).length > 0 && (
+                          <div className="text-xs text-muted-foreground space-y-1 mt-2 bg-muted/30 p-2 rounded">
+                            {evento.detalhes.cnpj && <p>CNPJ: {evento.detalhes.cnpj}</p>}
+                            {evento.detalhes.codigo && <p>Código: {evento.detalhes.codigo}</p>}
+                            {evento.detalhes.valor !== undefined && (
+                              <p>
+                                Valor: R${" "}
+                                {evento.detalhes.valor.toLocaleString("pt-BR", {
+                                  minimumFractionDigits: 2,
+                                })}
+                              </p>
+                            )}
+                            {evento.detalhes.statusAnterior && (
+                              <p>
+                                Status: {evento.detalhes.statusAnterior} → {evento.detalhes.statusNovo}
+                              </p>
+                            )}
+                            {evento.detalhes.quantidade !== undefined && (
+                              <p>Quantidade: {evento.detalhes.quantidade}</p>
+                            )}
+                            {evento.detalhes.tipoArquivo && <p>Tipo de Arquivo: {evento.detalhes.tipoArquivo}</p>}
+                          </div>
+                        )}
+                      </div>
+                      {evento.pagamentoId && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            const pag = pagamentos.find((p) => p.id === evento.pagamentoId)
+                            if (pag) {
+                              setPagamentoSelecionado(pag)
+                              setShowDetalhes(true)
+                              setShowAuditoria(false)
+                            }
+                          }}
+                        >
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="border-t pt-4">
+            <Button variant="outline" onClick={() => setShowAuditoria(false)} className="w-full">
+              Fechar
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Added the main header with new actions */}
+      <div className="flex justify-between items-center">
+        <h2 className="text-3xl font-bold">Conciliador Inteligente</h2>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setShowAuditoria(true)}>
+            <FileText className="h-4 w-4 mr-2" />
+            Trilha de Auditoria ({auditoriaEventos.length})
+          </Button>
+          <Button variant="outline" onClick={() => setShowNovoPagamento(true)}>
+            <Plus className="h-4 w-4 mr-2" />
+            Novo Pagamento
+          </Button>
+          <Button variant="outline" onClick={() => setShowImportarArquivo(true)}>
+            <Upload className="h-4 w-4 mr-2" />
+            Importar Arquivo
+          </Button>
+          <Button onClick={handleReconciliarAutomaticamente}>
+            <CheckCircle className="h-4 w-4 mr-2" />
+            Reconciliar Automaticamente
+          </Button>
+        </div>
+      </div>
+
+      {/* ... rest of the component ... */}
     </div>
   )
 }
