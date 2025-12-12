@@ -891,6 +891,9 @@ export function ConciliadorInteligente({
         valorEsperado: sel.valorOriginal,
         valorConciliado: sel.valorAssociado,
         formaPagamento: pagamentoConciliar.formaPagamento,
+        banco: pagamentoConciliar.banco || "",
+        canal: pagamentoConciliar.canal || "",
+        identificacao: pagamentoConciliar.identificacao || "",
         status: "conciliado" as const,
         tipo: "fracionado" as const,
         origem: pagamentoConciliar.origem,
@@ -907,6 +910,7 @@ export function ConciliadorInteligente({
               valorFinal: sel.valorAssociado,
               status: "conciliado" as const,
               formaPagamento: pagamentoConciliar.formaPagamento,
+              banco: pagamentoConciliar.detalhes.banco || pagamentoConciliar.banco || "",
               pagamentoParcialValor: sel.valorAssociado,
               dataPagamentoParcial: pagamentoConciliar.data,
               valorFaltante: Math.max(0, sel.valorOriginal - sel.valorAssociado),
@@ -4734,9 +4738,6 @@ export function ConciliadorInteligente({
           </div>
         </DialogContent>
       </Dialog>
-
-      {/* Added the main header with new actions */}
-      
 
       {/* ... rest of the component ... */}
     </div>
