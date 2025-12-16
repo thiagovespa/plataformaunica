@@ -1,0 +1,328 @@
+name: Auto Release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  check-permissions:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check workflow permissions
+        run: |
+          echo "✓ Workflow permissions configured"
+          echo "If this workflow fails, check .github/SETUP.md for configuration instructions"
+
+  release:
+    needs: check-permissions
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Get latest tag
+        id: get_tag
+        run: |
+          git fetch --tags
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          echo "latest_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+          echo "Latest tag: $LATEST_TAG"
+
+      - name: Analyze commits
+        id: analyze
+        run: |
+          LATEST_TAG="${{ steps.get_tag.outputs.latest_tag }}"
+          
+          # Get commits since last tag
+          if [ "$LATEST_TAG" = "v0.0.0" ]; then
+            COMMITS=$(git log --pretty=format:"%s")
+          else
+            COMMITS=$(git log ${LATEST_TAG}..HEAD --pretty=format:"%s")
+          fi
+          
+          echo "Commits since $LATEST_TAG:"
+          echo "$COMMITS"
+          
+          # Determine version bump
+          BUMP="none"
+          if echo "$COMMITS" | grep -qE "^[a-z]+($$.+$$)?!:|BREAKING CHANGE:"; then
+            BUMP="major"
+          elif echo "$COMMITS" | grep -qE "^feat($$.+$$)?:"; then
+            BUMP="minor"
+          elif echo "$COMMITS" | grep -qE "^fix($$.+$$)?:"; then
+            BUMP="patch"
+          fi
+          
+          echo "bump=$BUMP" >> $GITHUB_OUTPUT
+          echo "Determined bump: $BUMP"
+
+      - name: Calculate new version
+        id: new_version
+        if: steps.analyze.outputs.bump != 'none'
+        run: |
+          LATEST_TAG="${{ steps.get_tag.outputs.latest_tag }}"
+          BUMP="${{ steps.analyze.outputs.bump }}"
+          
+          # Remove 'v' prefix
+          VERSION=${LATEST_TAG#v}
+          
+          # Split version
+          IFS='.' read -ra VERSION_PARTS <<< "$VERSION"
+          MAJOR=${VERSION_PARTS[0]:-0}
+          MINOR=${VERSION_PARTS[1]:-0}
+          PATCH=${VERSION_PARTS[2]:-0}
+          
+          # Bump version
+          if [ "$BUMP" = "major" ]; then
+            MAJOR=$((MAJOR + 1))
+            MINOR=0
+            PATCH=0
+          elif [ "$BUMP" = "minor" ]; then
+            MINOR=$((MINOR + 1))
+            PATCH=0
+          elif [ "$BUMP" = "patch" ]; then
+            PATCH=$((PATCH + 1))
+          fi
+          
+          NEW_VERSION="v${MAJOR}.${MINOR}.${PATCH}"
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "New version: $NEW_VERSION"
+
+      - name: Update package.json
+        if: steps.analyze.outputs.bump != 'none'
+        run: |
+          NEW_VERSION="${{ steps.new_version.outputs.new_version }}"
+          VERSION_NO_V=${NEW_VERSION#v}
+          
+          # Update package.json version
+          sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION_NO_V\"/" package.json
+          
+          echo "Updated package.json to version $VERSION_NO_V"
+
+      - name: Generate changelog
+        if: steps.analyze.outputs.bump != 'none'
+        id: changelog
+        run: |
+          LATEST_TAG="${{ steps.get_tag.outputs.latest_tag }}"
+          NEW_VERSION="${{ steps.new_version.outputs.new_version }}"
+          
+          # Get commits since last tag
+          if [ "$LATEST_TAG" = "v0.0.0" ]; then
+            COMMITS=$(git log --pretty=format:"%s|||%h|||%an" --reverse)
+          else
+            COMMITS=$(git log ${LATEST_TAG}..HEAD --pretty=format:"%s|||%h|||%an" --reverse)
+          fi
+          
+          # Initialize changelog sections
+          FEATURES=""
+          FIXES=""
+          DOCS=""
+          STYLE=""
+          REFACTOR=""
+          PERF=""
+          TEST=""
+          BUILD=""
+          CI=""
+          CHORE=""
+          BREAKING=""
+          OTHER=""
+          
+          # Parse commits
+          while IFS='|||' read -r subject hash author; do
+            # Check for breaking changes
+            if echo "$subject" | grep -qE "^[a-z]+($$.+$$)?!:|BREAKING CHANGE:"; then
+              BREAKING="${BREAKING}- ${subject} (${hash})\n"
+            fi
+            
+            # Categorize by type
+            if echo "$subject" | grep -qE "^feat($$.+$$)?:"; then
+              FEATURES="${FEATURES}- ${subject#*: } (${hash})\n"
+            elif echo "$subject" | grep -qE "^fix($$.+$$)?:"; then
+              FIXES="${FIXES}- ${subject#*: } (${hash})\n"
+            elif echo "$subject" | grep -qE "^docs($$.+$$)?:"; then
+              DOCS="${DOCS}- ${subject#*: } (${hash})\n"
+            elif echo "$subject" | grep -qE "^style($$.+$$)?:"; then
+              STYLE="${STYLE}- ${subject#*: } (${hash})\n"
+            elif echo "$subject" | grep -qE "^refactor($$.+$$)?:"; then
+              REFACTOR="${REFACTOR}- ${subject#*: } (${hash})\n"
+            elif echo "$subject" | grep -qE "^perf($$.+$$)?:"; then
+              PERF="${PERF}- ${subject#*: } (${hash})\n"
+            elif echo "$subject" | grep -qE "^test($$.+$$)?:"; then
+              TEST="${TEST}- ${subject#*: } (${hash})\n"
+            elif echo "$subject" | grep -qE "^build($$.+$$)?:"; then
+              BUILD="${BUILD}- ${subject#*: } (${hash})\n"
+            elif echo "$subject" | grep -qE "^ci($$.+$$)?:"; then
+              CI="${CI}- ${subject#*: } (${hash})\n"
+            elif echo "$subject" | grep -qE "^chore($$.+$$)?:"; then
+              CHORE="${CHORE}- ${subject#*: } (${hash})\n"
+            else
+              OTHER="${OTHER}- ${subject} (${hash})\n"
+            fi
+          done <<< "$COMMITS"
+          
+          # Build changelog
+          CHANGELOG="## ${NEW_VERSION} - $(date +%Y-%m-%d)\n\n"
+          
+          if [ -n "$BREAKING" ]; then
+            CHANGELOG="${CHANGELOG}### ⚠️ BREAKING CHANGES\n\n${BREAKING}\n"
+          fi
+          
+          if [ -n "$FEATURES" ]; then
+            CHANGELOG="${CHANGELOG}### ✨ Features\n\n${FEATURES}\n"
+          fi
+          
+          if [ -n "$FIXES" ]; then
+            CHANGELOG="${CHANGELOG}### 🐛 Bug Fixes\n\n${FIXES}\n"
+          fi
+          
+          if [ -n "$DOCS" ]; then
+            CHANGELOG="${CHANGELOG}### 📝 Documentation\n\n${DOCS}\n"
+          fi
+          
+          if [ -n "$STYLE" ]; then
+            CHANGELOG="${CHANGELOG}### 💄 Styles\n\n${STYLE}\n"
+          fi
+          
+          if [ -n "$REFACTOR" ]; then
+            CHANGELOG="${CHANGELOG}### ♻️ Code Refactoring\n\n${REFACTOR}\n"
+          fi
+          
+          if [ -n "$PERF" ]; then
+            CHANGELOG="${CHANGELOG}### ⚡ Performance Improvements\n\n${PERF}\n"
+          fi
+          
+          if [ -n "$TEST" ]; then
+            CHANGELOG="${CHANGELOG}### ✅ Tests\n\n${TEST}\n"
+          fi
+          
+          if [ -n "$BUILD" ]; then
+            CHANGELOG="${CHANGELOG}### 🔧 Build System\n\n${BUILD}\n"
+          fi
+          
+          if [ -n "$CI" ]; then
+            CHANGELOG="${CHANGELOG}### 👷 CI/CD\n\n${CI}\n"
+          fi
+          
+          if [ -n "$CHORE" ]; then
+            CHANGELOG="${CHANGELOG}### 🔨 Chores\n\n${CHORE}\n"
+          fi
+          
+          if [ -n "$OTHER" ]; then
+            CHANGELOG="${CHANGELOG}### Other Changes\n\n${OTHER}\n"
+          fi
+          
+          # Save changelog to file
+          echo -e "$CHANGELOG" > new_changelog.md
+          
+          # Prepend to CHANGELOG.md
+          if [ -f CHANGELOG.md ]; then
+            cat CHANGELOG.md >> new_changelog.md
+          fi
+          mv new_changelog.md CHANGELOG.md
+          
+          # Save release notes for GitHub (without version header)
+          RELEASE_NOTES="## What's Changed\n\n"
+          
+          if [ -n "$BREAKING" ]; then
+            RELEASE_NOTES="${RELEASE_NOTES}### ⚠️ BREAKING CHANGES\n\n${BREAKING}\n"
+          fi
+          
+          if [ -n "$FEATURES" ]; then
+            RELEASE_NOTES="${RELEASE_NOTES}### ✨ Features\n\n${FEATURES}\n"
+          fi
+          
+          if [ -n "$FIXES" ]; then
+            RELEASE_NOTES="${RELEASE_NOTES}### 🐛 Bug Fixes\n\n${FIXES}\n"
+          fi
+          
+          if [ -n "$DOCS" ]; then
+            RELEASE_NOTES="${RELEASE_NOTES}### 📝 Documentation\n\n${DOCS}\n"
+          fi
+          
+          if [ -n "$STYLE" ]; then
+            RELEASE_NOTES="${RELEASE_NOTES}### 💄 Styles\n\n${STYLE}\n"
+          fi
+          
+          if [ -n "$REFACTOR" ]; then
+            RELEASE_NOTES="${RELEASE_NOTES}### ♻️ Code Refactoring\n\n${REFACTOR}\n"
+          fi
+          
+          if [ -n "$PERF" ]; then
+            RELEASE_NOTES="${RELEASE_NOTES}### ⚡ Performance Improvements\n\n${PERF}\n"
+          fi
+          
+          if [ -n "$TEST" ]; then
+            RELEASE_NOTES="${RELEASE_NOTES}### ✅ Tests\n\n${TEST}\n"
+          fi
+          
+          if [ -n "$BUILD" ]; then
+            RELEASE_NOTES="${RELEASE_NOTES}### 🔧 Build System\n\n${BUILD}\n"
+          fi
+          
+          if [ -n "$CI" ]; then
+            RELEASE_NOTES="${RELEASE_NOTES}### 👷 CI/CD\n\n${CI}\n"
+          fi
+          
+          if [ -n "$CHORE" ]; then
+            RELEASE_NOTES="${RELEASE_NOTES}### 🔨 Chores\n\n${CHORE}\n"
+          fi
+          
+          if [ -n "$OTHER" ]; then
+            RELEASE_NOTES="${RELEASE_NOTES}### Other Changes\n\n${OTHER}\n"
+          fi
+          
+          echo -e "$RELEASE_NOTES" > release_notes.md
+          
+          echo "Generated changelog and release notes for $NEW_VERSION"
+
+      - name: Commit changes
+        if: steps.analyze.outputs.bump != 'none'
+        run: |
+          NEW_VERSION="${{ steps.new_version.outputs.new_version }}"
+          
+          git add package.json CHANGELOG.md
+          git commit -m "chore(release): ${NEW_VERSION}"
+          git push origin main
+
+      - name: Create tag
+        if: steps.analyze.outputs.bump != 'none'
+        run: |
+          NEW_VERSION="${{ steps.new_version.outputs.new_version }}"
+          
+          git tag -a "$NEW_VERSION" -m "Release $NEW_VERSION"
+          git push origin "$NEW_VERSION"
+
+      - name: Create GitHub Release
+        if: steps.analyze.outputs.bump != 'none'
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.new_version.outputs.new_version }}
+          release_name: ${{ steps.new_version.outputs.new_version }}
+          body_path: release_notes.md
+          draft: false
+          prerelease: false
+
+      - name: No release needed
+        if: steps.analyze.outputs.bump == 'none'
+        run: |
+          echo "No conventional commits found. Skipping release."
