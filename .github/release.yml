@@ -1,0 +1,153 @@
+name: Create Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get previous tag
+        id: previoustag
+        run: |
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 $(git rev-list --tags --skip=1 --max-count=1) 2>/dev/null || echo "")
+          echo "previous_tag=$PREVIOUS_TAG" >> $GITHUB_OUTPUT
+          echo "Previous tag: $PREVIOUS_TAG"
+
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          CURRENT_TAG=${GITHUB_REF#refs/tags/}
+          PREVIOUS_TAG="${{ steps.previoustag.outputs.previous_tag }}"
+          
+          echo "Generating release notes for $CURRENT_TAG"
+          
+          # Get commits between tags
+          if [ -z "$PREVIOUS_TAG" ]; then
+            COMMITS=$(git log --pretty=format:"%s|||%h|||%an" --reverse)
+          else
+            COMMITS=$(git log ${PREVIOUS_TAG}..${CURRENT_TAG} --pretty=format:"%s|||%h|||%an" --reverse)
+          fi
+          
+          # Initialize sections
+          FEATURES=""
+          FIXES=""
+          DOCS=""
+          STYLE=""
+          REFACTOR=""
+          PERF=""
+          TEST=""
+          BUILD=""
+          CI=""
+          CHORE=""
+          BREAKING=""
+          OTHER=""
+          
+          # Parse commits
+          while IFS='|||' read -r subject hash author; do
+            # Check for breaking changes
+            if echo "$subject" | grep -qE "^[a-z]+($$.+$$)?!:|BREAKING CHANGE:"; then
+              BREAKING="${BREAKING}- ${subject} (${hash})\n"
+            fi
+            
+            # Categorize by type
+            if echo "$subject" | grep -qE "^feat($$.+$$)?:"; then
+              FEATURES="${FEATURES}- ${subject#*: } (${hash})\n"
+            elif echo "$subject" | grep -qE "^fix($$.+$$)?:"; then
+              FIXES="${FIXES}- ${subject#*: } (${hash})\n"
+            elif echo "$subject" | grep -qE "^docs($$.+$$)?:"; then
+              DOCS="${DOCS}- ${subject#*: } (${hash})\n"
+            elif echo "$subject" | grep -qE "^style($$.+$$)?:"; then
+              STYLE="${STYLE}- ${subject#*: } (${hash})\n"
+            elif echo "$subject" | grep -qE "^refactor($$.+$$)?:"; then
+              REFACTOR="${REFACTOR}- ${subject#*: } (${hash})\n"
+            elif echo "$subject" | grep -qE "^perf($$.+$$)?:"; then
+              PERF="${PERF}- ${subject#*: } (${hash})\n"
+            elif echo "$subject" | grep -qE "^test($$.+$$)?:"; then
+              TEST="${TEST}- ${subject#*: } (${hash})\n"
+            elif echo "$subject" | grep -qE "^build($$.+$$)?:"; then
+              BUILD="${BUILD}- ${subject#*: } (${hash})\n"
+            elif echo "$subject" | grep -qE "^ci($$.+$$)?:"; then
+              CI="${CI}- ${subject#*: } (${hash})\n"
+            elif echo "$subject" | grep -qE "^chore($$.+$$)?:"; then
+              CHORE="${CHORE}- ${subject#*: } (${hash})\n"
+            else
+              OTHER="${OTHER}- ${subject} (${hash})\n"
+            fi
+          done <<< "$COMMITS"
+          
+          # Build release notes
+          NOTES="## What's Changed\n\n"
+          
+          if [ -n "$BREAKING" ]; then
+            NOTES="${NOTES}### ⚠️ BREAKING CHANGES\n\n${BREAKING}\n"
+          fi
+          
+          if [ -n "$FEATURES" ]; then
+            NOTES="${NOTES}### ✨ Features\n\n${FEATURES}\n"
+          fi
+          
+          if [ -n "$FIXES" ]; then
+            NOTES="${NOTES}### 🐛 Bug Fixes\n\n${FIXES}\n"
+          fi
+          
+          if [ -n "$DOCS" ]; then
+            NOTES="${NOTES}### 📝 Documentation\n\n${DOCS}\n"
+          fi
+          
+          if [ -n "$STYLE" ]; then
+            NOTES="${NOTES}### 💄 Styles\n\n${STYLE}\n"
+          fi
+          
+          if [ -n "$REFACTOR" ]; then
+            NOTES="${NOTES}### ♻️ Code Refactoring\n\n${REFACTOR}\n"
+          fi
+          
+          if [ -n "$PERF" ]; then
+            NOTES="${NOTES}### ⚡ Performance Improvements\n\n${PERF}\n"
+          fi
+          
+          if [ -n "$TEST" ]; then
+            NOTES="${NOTES}### ✅ Tests\n\n${TEST}\n"
+          fi
+          
+          if [ -n "$BUILD" ]; then
+            NOTES="${NOTES}### 🔧 Build System\n\n${BUILD}\n"
+          fi
+          
+          if [ -n "$CI" ]; then
+            NOTES="${NOTES}### 👷 CI/CD\n\n${CI}\n"
+          fi
+          
+          if [ -n "$CHORE" ]; then
+            NOTES="${NOTES}### 🔨 Chores\n\n${CHORE}\n"
+          fi
+          
+          if [ -n "$OTHER" ]; then
+            NOTES="${NOTES}### Other Changes\n\n${OTHER}\n"
+          fi
+          
+          # Save to file
+          echo -e "$NOTES" > /tmp/release_notes.md
+          cat /tmp/release_notes.md
+
+      - name: Create Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: Release ${{ github.ref_name }}
+          body_path: /tmp/release_notes.md
+          draft: false
+          prerelease: false
