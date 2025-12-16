@@ -9,12 +9,12 @@ Cria um novo pagamento no sistema com associação ao credor.
 **Endpoint:** `POST /api/pagamentos`
 
 **Headers:**
-\`\`\`
+```
 Content-Type: application/json
-\`\`\`
+```
 
 **Body:**
-\`\`\`json
+```json
 {
   "codigo": "1234",
   "data": "15/01/2024",
@@ -31,7 +31,7 @@ Content-Type: application/json
   "credorDocumento": "98765432000111",
   "credorFormaRecebimento": "PIX"
 }
-\`\`\`
+```
 
 ### Campos
 
@@ -55,7 +55,7 @@ Content-Type: application/json
 ### Response
 
 **Sucesso (201 Created):**
-\`\`\`json
+```json
 {
   "success": true,
   "message": "Pagamento criado com sucesso",
@@ -83,10 +83,10 @@ Content-Type: application/json
     }
   }
 }
-\`\`\`
+```
 
 **Erro de Validação (400 Bad Request):**
-\`\`\`json
+```json
 {
   "success": false,
   "message": "Erro de validação",
@@ -96,21 +96,21 @@ Content-Type: application/json
     "Campo 'credorCodigo' é obrigatório"
   ]
 }
-\`\`\`
+```
 
 **Erro do Servidor (500 Internal Server Error):**
-\`\`\`json
+```json
 {
   "success": false,
   "message": "Erro ao processar requisição",
   "error": "Descrição do erro"
 }
-\`\`\`
+```
 
 ### Exemplos de Uso
 
 **cURL:**
-\`\`\`bash
+```bash
 curl -X POST http://localhost:3000/api/pagamentos \
   -H "Content-Type: application/json" \
   -d '{
@@ -128,10 +128,10 @@ curl -X POST http://localhost:3000/api/pagamentos \
     "credorDocumento": "98765432000111",
     "credorFormaRecebimento": "PIX"
   }'
-\`\`\`
+```
 
 **JavaScript (fetch):**
-\`\`\`javascript
+```javascript
 const response = await fetch('http://localhost:3000/api/pagamentos', {
   method: 'POST',
   headers: {
@@ -156,7 +156,7 @@ const response = await fetch('http://localhost:3000/api/pagamentos', {
 
 const result = await response.json();
 console.log(result);
-\`\`\`
+```
 
 ### Notas
 
