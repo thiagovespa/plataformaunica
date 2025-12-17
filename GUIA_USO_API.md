@@ -68,7 +68,7 @@ Exemplo de estrutura JSON:
 #### Usando cURL (Terminal/Linha de Comando):
 
 ```bash
-curl -X POST http://localhost:3000/api/pagamentos \
+curl -X POST https://api.plataformaunica.com.br/api/pagamentos \
   -H "Content-Type: application/json" \
   -d '{
     "data": "2024-01-15",
@@ -102,7 +102,7 @@ const novoPagamento = {
   credorFormaRecebimento: "TED"
 };
 
-fetch('http://localhost:3000/api/pagamentos', {
+fetch('https://api.plataformaunica.com.br/api/pagamentos', {
   method: 'POST',
   headers: {
     'Content-Type': 'application/json'
@@ -139,7 +139,7 @@ novo_pagamento = {
 }
 
 response = requests.post(
-    'http://localhost:3000/api/pagamentos',
+    'https://api.plataformaunica.com.br/api/pagamentos',
     headers={'Content-Type': 'application/json'},
     data=json.dumps(novo_pagamento)
 )
@@ -240,7 +240,7 @@ else:
 
 1. Abra o Postman
 2. Crie uma nova requisição POST
-3. Configure a URL: `http://localhost:3000/api/pagamentos`
+3. Configure a URL: `https://api.plataformaunica.com.br/api/pagamentos`
 4. Na aba "Headers", adicione:
    - Key: `Content-Type`
    - Value: `application/json`
@@ -252,7 +252,7 @@ else:
 1. Abra o Insomnia
 2. Crie uma nova requisição HTTP
 3. Selecione o método POST
-4. Configure a URL: `http://localhost:3000/api/pagamentos`
+4. Configure a URL: `https://api.plataformaunica.com.br/api/pagamentos`
 5. No corpo da requisição, selecione "JSON"
 6. Cole o JSON de exemplo
 7. Clique em "Send"
@@ -261,11 +261,12 @@ else:
 
 ## Integração em Produção
 
-Quando a aplicação estiver em produção, substitua `http://localhost:3000` pela URL de produção:
+A URL da API depende do ambiente:
 
-```
-https://seu-dominio.com/api/pagamentos
-```
+- **Produção:** `https://api.plataformaunica.com.br`
+- **Desenvolvimento local:** `http://localhost:3000`
+
+Certifique-se de usar a URL correta de acordo com o ambiente onde sua aplicação está rodando.
 
 ---
 

@@ -37,6 +37,7 @@ import {
   SettingsIcon,
   LogOut,
   Trash2,
+  BookOpen,
 } from "lucide-react"
 import { DistribuidorProporcional } from "@/components/distribuidor-proporcional"
 import { ConciliadorInteligente } from "@/components/conciliador-inteligente"
@@ -59,6 +60,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog" // Added AlertDialog import
+import { Tutorial } from "@/components/tutorial"
 
 interface Mensagem {
   id: number
@@ -87,9 +89,9 @@ interface Alerta {
 }
 
 export default function PlataformaUnica() {
-  const [activeModule, setActiveModule] = useState<"dashboard" | "distribuidor" | "conciliador" | "administracao">(
-    "dashboard",
-  )
+  const [activeModule, setActiveModule] = useState<
+    "dashboard" | "distribuidor" | "conciliador" | "administracao" | "tutorial"
+  >("dashboard")
 
   const [pagadores, setPagadores] = useState<Pagador[]>([])
   const [credoresBase, setCredoresBase] = useState<CredorBase[]>([])
@@ -540,6 +542,18 @@ export default function PlataformaUnica() {
               <LucideMapIcon className="h-4 w-4" />
               Mapa de Liquidação
             </button>
+            <button
+              onClick={() => setActiveModule("tutorial")}
+              className={cn(
+                "flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2",
+                activeModule === "tutorial"
+                  ? "border-primary text-primary"
+                  : "border-transparent text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <BookOpen className="h-4 w-4" />
+              Tutorial
+            </button>
           </div>
         </div>
       </nav>
@@ -816,6 +830,7 @@ export default function PlataformaUnica() {
             setHistoricoImportacaoMapa={setHistoricoImportacaoMapa}
           />
         )}
+        {activeModule === "tutorial" && <Tutorial />}
       </main>
 
       {/* Chat Button */}
