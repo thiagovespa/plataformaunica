@@ -3,11 +3,25 @@
 import { TooltipContent } from "@/components/ui/tooltip"
 
 import type React from "react"
-import { History, Calculator, Check, FileText, Pencil, Plus, Search, Trash2, X, CalendarIcon, Info } from "lucide-react"
+import {
+  History,
+  Calculator,
+  Check,
+  FileText,
+  Pencil,
+  Plus,
+  Search,
+  Trash2,
+  X,
+  CalendarIcon,
+  Info,
+  AlertTriangle,
+} from "lucide-react"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Calendar } from "@/components/ui/calendar"
 import { Tooltip, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 
 import { useState, useEffect } from "react"
 import { Input } from "@/components/ui/input"
@@ -27,7 +41,9 @@ const formatToBrazilian = (value: number): string => {
   if (value === undefined || value === null || isNaN(value)) {
     return "0,00"
   }
-  return value.toLocaleString("pt-BR", {
+  // Prevent -0.00 by converting values between -0.01 and 0 to positive 0
+  const adjustedValue = Math.abs(value) < 0.01 ? Math.abs(value) : value
+  return adjustedValue.toLocaleString("pt-BR", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })
@@ -532,14 +548,16 @@ export function DistribuidorProporcional({
         if (credorParaAjuste.saldoRemanescente > 0) {
           credorParaAjuste.status = "parcial"
         }
-        // Add to lesados if not already there from exclusion or minimum
-        if (!credoresLesadosNaDistribuicao.includes(credorParaAjuste.nome)) {
-          credoresLesadosNaDistribuicao.push(credorParaAjuste.nome)
-        }
+        if (excedente >= 0.01) {
+          // Add to lesados if not already there from exclusion or minimum
+          if (!credoresLesadosNaDistribuicao.includes(credorParaAjuste.nome)) {
+            credoresLesadosNaDistribuicao.push(credorParaAjuste.nome)
+          }
 
-        setErroRateio(
-          `Aviso: Devido ao arredondamento bancário, o credor "${credorParaAjuste.nome}" terá R$ ${formatToBrazilian(excedente)} deduzido do seu rateio, ficando como valor a pagar posteriormente.`,
-        )
+          setErroRateio(
+            `Aviso: Devido ao arredondamento bancário, o credor "${credorParaAjuste.nome}" terá R$ ${formatToBrazilian(excedente)} deduzido do seu rateio, ficando como valor a pagar posteriormente.`,
+          )
+        }
       }
     }
 
@@ -547,6 +565,15 @@ export function DistribuidorProporcional({
     const totalRateadoFinal = resultadoDistribuicao.reduce((sum, r) => sum + r.valorRateado, 0)
     for (const r of resultadoDistribuicao) {
       r.percentualDoRateio = totalRateadoFinal > 0 ? (r.valorRateado / totalRateadoFinal) * 100 : 0
+    }
+
+    const totalDevidoGeral = resultadoDistribuicao.reduce((sum, r) => sum + r.valorDevido, 0)
+    const todosQuitados = resultadoDistribuicao.every((r) => r.status === "quitado" || r.valorDevido <= 0)
+
+    if (todosQuitados && disponivel < totalDevidoGeral && disponivel > 0) {
+      setErroRateio(
+        `Aviso: O valor disponível (R$ ${formatToBrazilian(disponivel)}) é menor que o total devido (R$ ${formatToBrazilian(totalDevidoGeral)}), mas devido ao arredondamento bancário, todos os pagamentos foram quitados.`,
+      )
     }
 
     setDistribuicao(resultadoDistribuicao)
@@ -600,7 +627,7 @@ export function DistribuidorProporcional({
     const valorArredondamento =
       erroRateio?.startsWith("Aviso:") || erroRateio?.startsWith("Warning:") ? resultado.valorLesado : 0
 
-    if (valorArredondamento > 0 && erroRateio) {
+    if (valorArredondamento >= 0.01 && erroRateio) {
       const match = erroRateio.match(/"([^"]+)"/)
       if (match && match[1]) {
         const credorExistente = credoresLesados.find((c) => c.nome === match[1])
@@ -637,7 +664,7 @@ export function DistribuidorProporcional({
 
     // </CHANGE> Send statistics to parent
     if (onEstatisticasChange) {
-      const currentHistoricoLength = historico.length // Get the length before prepending
+      const currentHistoricoLength = historico.length // Get the length before ולה prepend
       const totalValorProcessado = historico.reduce((acc, h) => acc + h.valorRateado, 0) + resultado.valorDistribuido
       onEstatisticasChange({
         distribuicoesAtivas: currentHistoricoLength + 1,
@@ -1132,6 +1159,18 @@ export function DistribuidorProporcional({
             <CardDescription>Visualize como o valor será distribuído entre os credores</CardDescription>
           </CardHeader>
           <CardContent>
+            {resultado.valorSobra > 0 && (
+              <Alert className="mb-4">
+                <AlertTriangle className="h-4 w-4" />
+                <AlertTitle>Sobra Detectada</AlertTitle>
+                <AlertDescription>
+                  Há um valor de R$ {formatToBrazilian(resultado.valorSobra)} que não foi possível distribuir. Isso pode
+                  ocorrer quando o valor disponível é menor que o valor mínimo de distribuição dos credores restantes ou
+                  devido a arredondamentos bancários.
+                </AlertDescription>
+              </Alert>
+            )}
+
             <div className="mb-6 grid gap-4 md:grid-cols-3">
               <div className="rounded-lg border p-4">
                 <div className="text-sm text-muted-foreground">Valor Total Devido</div>
@@ -1156,7 +1195,7 @@ export function DistribuidorProporcional({
                     <TableHead>Nome</TableHead>
                     <TableHead className="text-right">Valor Devido</TableHead>
                     <TableHead className="text-right">% do Rateio</TableHead>
-                    <TableHead className="text-right">Valor Rateado</TableHead>
+                    <TableHead className="text-right bg-primary/10">Valor Rateado</TableHead>
                     <TableHead className="text-right">Saldo</TableHead>
                     <TableHead>Status</TableHead>
                   </TableRow>
@@ -1170,7 +1209,9 @@ export function DistribuidorProporcional({
                       <TableCell className="font-medium">{d.nome}</TableCell>
                       <TableCell className="text-right">R$ {formatToBrazilian(d.valorDevido)}</TableCell>
                       <TableCell className="text-right">{d.percentualDoRateio.toFixed(8)}%</TableCell>
-                      <TableCell className="text-right font-medium">R$ {formatToBrazilian(d.valorRateado)}</TableCell>
+                      <TableCell className="text-right font-bold bg-primary/10 text-primary">
+                        R$ {formatToBrazilian(d.valorRateado)}
+                      </TableCell>
                       <TableCell className="text-right">R$ {formatToBrazilian(d.saldoRemanescente)}</TableCell>
                       <TableCell>
                         <Badge
@@ -1345,7 +1386,7 @@ export function DistribuidorProporcional({
                       <TableRow>
                         <TableHead>Credor</TableHead>
                         <TableHead className="text-right">Valor Devido</TableHead>
-                        <TableHead className="text-right">Valor Rateado</TableHead>
+                        <TableHead className="text-right bg-primary/10">Valor Rateado</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -1353,7 +1394,9 @@ export function DistribuidorProporcional({
                         <TableRow key={i}>
                           <TableCell>{v.nome}</TableCell>
                           <TableCell className="text-right">R$ {formatToBrazilian(v.valor)}</TableCell>
-                          <TableCell className="text-right">R$ {formatToBrazilian(v.valorRateado)}</TableCell>
+                          <TableCell className="text-right font-bold bg-primary/10 text-primary">
+                            R$ {formatToBrazilian(v.valorRateado)}
+                          </TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -1427,7 +1470,7 @@ export function DistribuidorProporcional({
                         <TableHead>Data</TableHead>
                         <TableHead>Pagador</TableHead>
                         <TableHead className="text-right">Valor Devido</TableHead>
-                        <TableHead className="text-right">Valor Rateado</TableHead>
+                        <TableHead className="text-right bg-primary/10">Valor Rateado</TableHead>
                         <TableHead className="text-right">Saldo</TableHead>
                         <TableHead className="text-right">Sobra</TableHead>
                         <TableHead className="text-right">Lesado</TableHead>
@@ -1441,7 +1484,7 @@ export function DistribuidorProporcional({
                           <TableCell className="whitespace-nowrap">{entry.dataPagamento}</TableCell>
                           <TableCell>{entry.pagador}</TableCell>
                           <TableCell className="text-right">R$ {formatToBrazilian(entry.valorTotalDevido)}</TableCell>
-                          <TableCell className="text-right text-primary font-medium">
+                          <TableCell className="text-right font-bold bg-primary/10 text-primary">
                             R$ {formatToBrazilian(entry.valorRateado)}
                           </TableCell>
                           <TableCell
@@ -1495,8 +1538,8 @@ export function DistribuidorProporcional({
                     <TableHeader>
                       <TableRow>
                         <TableHead>Credor</TableHead>
-                        <TableHead className="text-right">Total Rateado</TableHead>
-                        <TableHead className="text-center">Participações</TableHead>
+                        <TableHead className="text-right">Valor Devido</TableHead>
+                        <TableHead className="text-center bg-primary/10">Participações</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -1521,7 +1564,7 @@ export function DistribuidorProporcional({
                           .map(([nome, totals], i) => (
                             <TableRow key={i}>
                               <TableCell>{nome}</TableCell>
-                              <TableCell className="text-right">R$ {formatToBrazilian(totals.rateado)}</TableCell>
+                              <TableCell className="text-right">R$ {formatToBrazilian(totals.devido)}</TableCell>
                               <TableCell className="text-center">{totals.participacoes}</TableCell>
                             </TableRow>
                           ))
