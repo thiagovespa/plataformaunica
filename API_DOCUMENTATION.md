@@ -1,8 +1,51 @@
 # API de Pagamentos - Plataforma Única
 
+## Visão Geral
+
+A API da Plataforma Única oferece endpoints para gerenciamento de pagamentos e consulta de relatórios financeiros (AVC/AVD).
+
+## Autenticação
+
+### APIs Públicas (Sem Autenticação)
+- `POST /api/pagamentos` - Criação de pagamentos
+
+### APIs Protegidas (Requerem JWT)
+- `GET /api/avc` - Consulta de AVC (A Vencer por Credor)
+- `GET /api/avd` - Consulta de AVD (A Vencer por Pagador)
+
+Para acessar as APIs protegidas, você deve primeiro obter um token JWT através do endpoint de login:
+
+**Endpoint de Login:** `POST /api/auth/login`
+
+**Request:**
+```json
+{
+  "username": "admin",
+  "password": "plataforma2024"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "expiresIn": "24h"
+}
+```
+
+Use o token retornado no header `Authorization` das requisições protegidas:
+```
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+```
+
+---
+
 ## POST /api/pagamentos
 
 Cria um novo pagamento no sistema com associação ao credor.
+
+**Autenticação:** Não requerida
 
 ### Request
 

@@ -2,7 +2,54 @@
 
 ## Visão Geral
 
-Este guia apresenta instruções práticas para usar a API REST de inserção de pagamentos da Plataforma Única.
+Este guia apresenta instruções práticas para usar as APIs REST da Plataforma Única.
+
+## Índice
+
+1. [API de Pagamentos](#api-de-pagamentos) - Inserção de novos pagamentos (Público)
+2. [APIs de Relatórios](#apis-de-relatórios) - Consulta de AVC/AVD (Requer Autenticação JWT)
+
+---
+
+## Autenticação
+
+### APIs Públicas
+A API de inserção de pagamentos (`POST /api/pagamentos`) não requer autenticação.
+
+### APIs Protegidas (AVC/AVD)
+As APIs de consulta de relatórios financeiros requerem autenticação via **JWT (JSON Web Token)**.
+
+#### Como obter um token:
+
+```bash
+curl -X POST https://api.plataformaunica.com.br/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username": "admin", "password": "plataforma2024"}'
+```
+
+**Resposta:**
+```json
+{
+  "success": true,
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "expiresIn": "24h"
+}
+```
+
+#### Como usar o token:
+
+Inclua o token no header `Authorization` de todas as requisições às APIs protegidas:
+
+```bash
+curl -X GET https://api.plataformaunica.com.br/api/avd \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+```
+
+**Importante:** O token expira em 24 horas. Você deve solicitar um novo token após a expiração.
+
+---
+
+## API de Pagamentos
 
 ## Endpoint Disponível
 
@@ -270,6 +317,22 @@ Certifique-se de usar a URL correta de acordo com o ambiente onde sua aplicaçã
 
 ---
 
+## APIs de Relatórios
+
+Para informações detalhadas sobre as APIs de AVC e AVD, consulte o arquivo `GUIA_API_AVC_AVD.md`.
+
+### Endpoints Disponíveis
+
+- **GET /api/avc** - Consulta A Vencer por Credor
+- **GET /api/avd** - Consulta A Vencer por Pagador
+
+Ambos os endpoints requerem autenticação JWT e suportam filtros por código.
+
+---
+
 ## Suporte
 
-Para dúvidas ou problemas com a API, consulte a documentação técnica completa em `API_DOCUMENTATION.md` ou entre em contato com a equipe de desenvolvimento.
+Para dúvidas ou problemas com a API:
+- **Pagamentos:** Consulte `API_DOCUMENTATION.md`
+- **Relatórios AVC/AVD:** Consulte `GUIA_API_AVC_AVD.md`
+- Entre em contato com a equipe de desenvolvimento

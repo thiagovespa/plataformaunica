@@ -2,11 +2,45 @@
 
 ## Autenticação
 
-Todas as requisições para as APIs de AVC e AVD requerem autenticação Basic Auth.
+Todas as requisições para as APIs de AVC e AVD requerem autenticação JWT (JSON Web Token).
 
-**Credenciais:**
-- Usuário: `admin`
-- Senha: `plataforma2024`
+### Fluxo de Autenticação
+
+1. **Obter Token:** Faça login com credenciais para obter um token JWT
+2. **Usar Token:** Inclua o token no header `Authorization: Bearer <token>` em todas as requisições
+3. **Renovar Token:** Tokens expiram em 24 horas. Faça login novamente quando necessário
+
+### Endpoint de Login
+
+**Endpoint:** `POST /api/auth/login`
+
+**Body:**
+```
+{
+  "username": "admin",
+  "password": "plataforma2024"
+}
+```
+
+**Exemplo de Requisição:**
+
+```bash
+curl -X POST https://api.plataformaunica.com.br/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"plataforma2024"}'
+```
+
+**Resposta de Sucesso:**
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "expiresIn": "24h",
+  "user": {
+    "username": "admin",
+    "role": "admin"
+  }
+}
+```
 
 ## Endpoints
 
@@ -18,7 +52,7 @@ Todas as requisições para as APIs de AVC e AVD requerem autenticação Basic A
 
 **Headers:**
 ```
-Authorization: Basic YWRtaW46cGxhdGFmb3JtYTIwMjQ=
+Authorization: Bearer <seu_token_jwt>
 ```
 
 **Parâmetros de Query (opcionais):**
@@ -27,13 +61,19 @@ Authorization: Basic YWRtaW46cGxhdGFmb3JtYTIwMjQ=
 **Exemplo de Requisição:**
 
 ```bash
+# Obter token primeiro
+TOKEN=$(curl -X POST https://api.plataformaunica.com.br/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"plataforma2024"}' \
+  | jq -r '.token')
+
 # Consultar todos os AVDs
 curl -X GET https://api.plataformaunica.com.br/api/avd \
-  -H "Authorization: Basic YWRtaW46cGxhdGFmb3JtYTIwMjQ="
+  -H "Authorization: Bearer $TOKEN"
 
 # Consultar AVD de um pagador específico
 curl -X GET "https://api.plataformaunica.com.br/api/avd?pagadorCodigo=1001" \
-  -H "Authorization: Basic YWRtaW46cGxhdGFmb3JtYTIwMjQ="
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 **Exemplo de Resposta:**
@@ -80,7 +120,7 @@ curl -X GET "https://api.plataformaunica.com.br/api/avd?pagadorCodigo=1001" \
 
 **Headers:**
 ```
-Authorization: Basic YWRtaW46cGxhdGFmb3JtYTIwMjQ=
+Authorization: Bearer <seu_token_jwt>
 ```
 
 **Parâmetros de Query (opcionais):**
@@ -89,13 +129,19 @@ Authorization: Basic YWRtaW46cGxhdGFmb3JtYTIwMjQ=
 **Exemplo de Requisição:**
 
 ```bash
+# Obter token primeiro
+TOKEN=$(curl -X POST https://api.plataformaunica.com.br/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"plataforma2024"}' \
+  | jq -r '.token')
+
 # Consultar todos os AVCs
 curl -X GET https://api.plataformaunica.com.br/api/avc \
-  -H "Authorization: Basic YWRtaW46cGxhdGFmb3JtYTIwMjQ="
+  -H "Authorization: Bearer $TOKEN"
 
 # Consultar AVC de um credor específico
 curl -X GET "https://api.plataformaunica.com.br/api/avc?credorCodigo=2001" \
-  -H "Authorization: Basic YWRtaW46cGxhdGFmb3JtYTIwMjQ="
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 **Exemplo de Resposta:**
@@ -137,7 +183,7 @@ curl -X GET "https://api.plataformaunica.com.br/api/avc?credorCodigo=2001" \
 ## Códigos de Status HTTP
 
 - `200` - Sucesso
-- `401` - Não autorizado (credenciais inválidas)
+- `401` - Não autorizado (token inválido, expirado ou ausente)
 - `500` - Erro interno do servidor
 
 ## Respostas de Erro
@@ -146,7 +192,7 @@ curl -X GET "https://api.plataformaunica.com.br/api/avc?credorCodigo=2001" \
 ```json
 {
   "error": "Não autorizado",
-  "message": "Credenciais inválidas"
+  "message": "Token inválido ou expirado"
 }
 ```
 
@@ -160,111 +206,189 @@ curl -X GET "https://api.plataformaunica.com.br/api/avc?credorCodigo=2001" \
 
 ## Exemplos de Uso
 
-### JavaScript/Fetch
+### JavaScript/Fetch com Gerenciamento de Token
 
 ```javascript
-// Função auxiliar para criar o header de autenticação
-function createAuthHeader(username, password) {
-  const credentials = btoa(`${username}:${password}`)
-  return `Basic ${credentials}`
-}
-
-// Consultar AVD
-async function consultarAVD(pagadorCodigo = null) {
-  const url = pagadorCodigo 
-    ? `https://api.plataformaunica.com.br/api/avd?pagadorCodigo=${pagadorCodigo}`
-    : 'https://api.plataformaunica.com.br/api/avd'
-    
-  const response = await fetch(url, {
-    method: 'GET',
-    headers: {
-      'Authorization': createAuthHeader('admin', 'plataforma2024')
-    }
-  })
-  
-  if (!response.ok) {
-    throw new Error(`HTTP error! status: ${response.status}`)
+class PlataformaUnicaAPI {
+  constructor() {
+    this.baseUrl = 'https://api.plataformaunica.com.br'
+    this.token = null
+    this.tokenExpiry = null
   }
-  
-  return await response.json()
-}
 
-// Consultar AVC
-async function consultarAVC(credorCodigo = null) {
-  const url = credorCodigo 
-    ? `https://api.plataformaunica.com.br/api/avc?credorCodigo=${credorCodigo}`
-    : 'https://api.plataformaunica.com.br/api/avc'
-    
-  const response = await fetch(url, {
-    method: 'GET',
-    headers: {
-      'Authorization': createAuthHeader('admin', 'plataforma2024')
+  async login(username = 'admin', password = 'plataforma2024') {
+    const response = await fetch(`${this.baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    })
+
+    if (!response.ok) {
+      throw new Error('Falha no login')
     }
-  })
-  
-  if (!response.ok) {
-    throw new Error(`HTTP error! status: ${response.status}`)
+
+    const data = await response.json()
+    this.token = data.token
+    // Expira em 24h - renovar 1h antes
+    this.tokenExpiry = Date.now() + (23 * 60 * 60 * 1000)
+    return data
   }
-  
-  return await response.json()
+
+  async ensureValidToken() {
+    if (!this.token || Date.now() >= this.tokenExpiry) {
+      await this.login()
+    }
+  }
+
+  async consultarAVD(pagadorCodigo = null) {
+    await this.ensureValidToken()
+
+    const url = pagadorCodigo 
+      ? `${this.baseUrl}/api/avd?pagadorCodigo=${pagadorCodigo}`
+      : `${this.baseUrl}/api/avd`
+      
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${this.token}`
+      }
+    })
+    
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
+    
+    return await response.json()
+  }
+
+  async consultarAVC(credorCodigo = null) {
+    await this.ensureValidToken()
+
+    const url = credorCodigo 
+      ? `${this.baseUrl}/api/avc?credorCodigo=${credorCodigo}`
+      : `${this.baseUrl}/api/avc`
+      
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${this.token}`
+      }
+    })
+    
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
+    
+    return await response.json()
+  }
 }
 
 // Uso
-consultarAVD()
+const api = new PlataformaUnicaAPI()
+
+// Consultar AVD (login automático)
+api.consultarAVD()
   .then(data => console.log('AVD:', data))
   .catch(error => console.error('Erro:', error))
 
-consultarAVC('2001')
+// Consultar AVC específico
+api.consultarAVC('2001')
   .then(data => console.log('AVC:', data))
   .catch(error => console.error('Erro:', error))
 ```
 
-### Python
+### Python com Gerenciamento de Token
 
 ```python
 import requests
-import base64
+from datetime import datetime, timedelta
 
-# Credenciais
-username = 'admin'
-password = 'plataforma2024'
+class PlataformaUnicaAPI:
+    def __init__(self):
+        self.base_url = 'https://api.plataformaunica.com.br'
+        self.token = None
+        self.token_expiry = None
 
-# Criar header de autenticação
-credentials = f"{username}:{password}"
-encoded_credentials = base64.b64encode(credentials.encode()).decode()
-headers = {
-    'Authorization': f'Basic {encoded_credentials}'
-}
+    def login(self, username='admin', password='plataforma2024'):
+        response = requests.post(
+            f'{self.base_url}/api/auth/login',
+            json={'username': username, 'password': password}
+        )
+        
+        if response.status_code != 200:
+            raise Exception('Falha no login')
+        
+        data = response.json()
+        self.token = data['token']
+        # Expira em 24h - renovar 1h antes
+        self.token_expiry = datetime.now() + timedelta(hours=23)
+        return data
 
-# Consultar AVD
-response = requests.get('https://api.plataformaunica.com.br/api/avd', headers=headers)
-if response.status_code == 200:
-    avd_data = response.json()
+    def ensure_valid_token(self):
+        if not self.token or datetime.now() >= self.token_expiry:
+            self.login()
+
+    def consultar_avd(self, pagador_codigo=None):
+        self.ensure_valid_token()
+        
+        url = f'{self.base_url}/api/avd'
+        params = {'pagadorCodigo': pagador_codigo} if pagador_codigo else None
+        headers = {'Authorization': f'Bearer {self.token}'}
+        
+        response = requests.get(url, headers=headers, params=params)
+        
+        if response.status_code == 200:
+            return response.json()
+        else:
+            raise Exception(f'Erro: {response.status_code} - {response.text}')
+
+    def consultar_avc(self, credor_codigo=None):
+        self.ensure_valid_token()
+        
+        url = f'{self.base_url}/api/avc'
+        params = {'credorCodigo': credor_codigo} if credor_codigo else None
+        headers = {'Authorization': f'Bearer {self.token}'}
+        
+        response = requests.get(url, headers=headers, params=params)
+        
+        if response.status_code == 200:
+            return response.json()
+        else:
+            raise Exception(f'Erro: {response.status_code} - {response.text}')
+
+# Uso
+api = PlataformaUnicaAPI()
+
+# Consultar AVD (login automático)
+try:
+    avd_data = api.consultar_avd()
     print('AVD:', avd_data)
-else:
-    print('Erro:', response.status_code, response.text)
+except Exception as e:
+    print('Erro:', e)
 
 # Consultar AVC específico
-response = requests.get(
-    'https://api.plataformaunica.com.br/api/avc',
-    headers=headers,
-    params={'credorCodigo': '2001'}
-)
-if response.status_code == 200:
-    avc_data = response.json()
+try:
+    avc_data = api.consultar_avc('2001')
     print('AVC:', avc_data)
-else:
-    print('Erro:', response.status_code, response.text)
+except Exception as e:
+    print('Erro:', e)
 ```
 
 ## Notas Importantes
 
-1. **Segurança:** As credenciais estão fixas no código para fins de demonstração. Em produção, use variáveis de ambiente e considere implementar OAuth2 ou JWT.
+1. **Segurança:** 
+   - Tokens JWT expiram em 24 horas
+   - Use HTTPS em produção
+   - Armazene tokens de forma segura (não em localStorage para aplicações sensíveis)
+   - Em produção, use variáveis de ambiente para credenciais
 
-2. **Dados:** Atualmente a API retorna dados mockados. Em produção, integre com um banco de dados real.
+2. **Gerenciamento de Token:**
+   - Implemente renovação automática antes da expiração
+   - Trate erros 401 renovando o token e repetindo a requisição
+   - Considere implementar refresh tokens para sessões longas
 
-3. **CORS:** Configure CORS adequadamente se a API for consumida por aplicações web de diferentes origens.
+3. **Dados:** Atualmente a API retorna dados mockados. Em produção, integre com um banco de dados real.
 
-4. **Rate Limiting:** Considere implementar rate limiting para evitar abuso da API.
+4. **CORS:** Configure CORS adequadamente se a API for consumida por aplicações web de diferentes origens.
 
-5. **Logs:** Implemente logging adequado para auditoria e debugging.
+5. **Logs:** Implemente logging adequado para auditoria e debugging, incluindo tentativas de autenticação.
