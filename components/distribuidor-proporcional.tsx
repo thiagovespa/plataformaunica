@@ -213,7 +213,7 @@ interface HistoricoEntry {
   valorRateado: number
   valorEmAberto: number
   valorLesado: number
-  credoresLesados: string[] // Names of credores who were affected by exclusion or rounding
+  credoresLesados: { nome: string; valorLesado: number }[] // Changed: now includes valor per credor
   credoresParticipantes: number
   credoresExcluidos: number
 }
@@ -584,12 +584,17 @@ export function DistribuidorProporcional({
       .filter((d) => d.status === "mínimo" || d.status === "excluido")
       .reduce((sum, d) => sum + d.valorDevido, 0)
 
-    const credoresLesados: string[] = []
+    const credoresLesados: { nome: string; valorLesado: number }[] = []
 
-    // Add credores who were excluded or below minimum
+    // Add credores who were excluded or below minimum with their valores
     distribuicao
       .filter((d) => d.status === "mínimo" || d.status === "excluido")
-      .forEach((d) => credoresLesados.push(d.nome))
+      .forEach((d) => {
+        credoresLesados.push({
+          nome: d.nome,
+          valorLesado: d.valorDevido, // The amount this credor lost
+        })
+      })
 
     // Check if there was a rounding adjustment warning
     const valorArredondamento =
@@ -597,8 +602,16 @@ export function DistribuidorProporcional({
 
     if (valorArredondamento > 0 && erroRateio) {
       const match = erroRateio.match(/"([^"]+)"/)
-      if (match && match[1] && !credoresLesados.includes(match[1])) {
-        credoresLesados.push(match[1])
+      if (match && match[1]) {
+        const credorExistente = credoresLesados.find((c) => c.nome === match[1])
+        if (credorExistente) {
+          credorExistente.valorLesado += valorArredondamento
+        } else {
+          credoresLesados.push({
+            nome: match[1],
+            valorLesado: valorArredondamento,
+          })
+        }
       }
     }
 
@@ -1284,11 +1297,30 @@ export function DistribuidorProporcional({
                     {relatorioSelecionado.credoresLesados && relatorioSelecionado.credoresLesados.length > 0 && (
                       <div className="mt-2 pt-2 border-t">
                         <p className="text-xs text-muted-foreground mb-1">Credores Afetados:</p>
-                        {relatorioSelecionado.credoresLesados.map((nome, i) => (
-                          <p key={i} className="text-sm text-red-600">
-                            {nome}
-                          </p>
-                        ))}
+                        <TooltipProvider>
+                          <div className="flex flex-wrap gap-1">
+                            {relatorioSelecionado.credoresLesados.map((credor, i) => (
+                              <Tooltip key={i}>
+                                <TooltipTrigger asChild>
+                                  <Badge variant="destructive" className="cursor-help text-xs">
+                                    {credor.nome}
+                                  </Badge>
+                                </TooltipTrigger>
+                                <TooltipContent className="bg-popover text-popover-foreground border shadow-md">
+                                  <div className="space-y-1">
+                                    <p className="font-semibold">{credor.nome}</p>
+                                    <p className="text-sm">
+                                      Valor Lesado:{" "}
+                                      <span className="font-medium text-red-600">
+                                        R$ {formatToBrazilian(credor.valorLesado)}
+                                      </span>
+                                    </p>
+                                  </div>
+                                </TooltipContent>
+                              </Tooltip>
+                            ))}
+                          </div>
+                        </TooltipProvider>
                       </div>
                     )}
                   </CardContent>
@@ -1337,11 +1369,17 @@ export function DistribuidorProporcional({
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <div className="flex flex-wrap gap-2">
-                      {relatorioSelecionado.credoresLesados.map((credorNome, i) => (
-                        <Badge key={i} variant="destructive" className="text-xs px-3 py-1">
-                          {credorNome}
-                        </Badge>
+                    <div className="space-y-2">
+                      {relatorioSelecionado.credoresLesados.map((credor, i) => (
+                        <div
+                          key={i}
+                          className="flex justify-between items-center p-2 bg-red-50 rounded border border-red-200"
+                        >
+                          <span className="font-medium text-red-900">{credor.nome}</span>
+                          <Badge variant="destructive" className="text-xs px-3 py-1">
+                            R$ {formatToBrazilian(credor.valorLesado)}
+                          </Badge>
+                        </div>
                       ))}
                     </div>
                   </CardContent>
@@ -1419,10 +1457,17 @@ export function DistribuidorProporcional({
                           </TableCell>
                           <TableCell className="max-w-xs">
                             {entry.credoresLesados && entry.credoresLesados.length > 0 ? (
-                              <div className="text-sm">
-                                {entry.credoresLesados.map((nome, i) => (
-                                  <div key={i} className="text-red-600 truncate" title={nome}>
-                                    {nome}
+                              <div className="text-sm space-y-1">
+                                {entry.credoresLesados.map((credor, i) => (
+                                  <div
+                                    key={i}
+                                    className="flex justify-between gap-2"
+                                    title={`${credor.nome}: R$ ${formatToBrazilian(credor.valorLesado)}`}
+                                  >
+                                    <span className="text-red-600 truncate">{credor.nome}</span>
+                                    <span className="text-red-600 font-medium whitespace-nowrap">
+                                      R$ {formatToBrazilian(credor.valorLesado)}
+                                    </span>
                                   </div>
                                 ))}
                               </div>
