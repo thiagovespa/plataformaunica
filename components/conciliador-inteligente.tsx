@@ -1454,6 +1454,7 @@ export function ConciliadorInteligente({
   const parseArquivoBancario = (content: string, tipo: string, fileName: string): Pagamento[] => {
     const pagamentos: Pagamento[] = []
     const lines = content.split("\n").filter((l) => l.trim())
+    const errosValidacao: string[] = []
 
     if (tipo === "csv") {
       // Parse CSV - skip header
@@ -1664,50 +1665,89 @@ export function ConciliadorInteligente({
         }
       })
     } else if (tipo === "cnab240" || tipo === "cnab400") {
-      // Parse CNAB - simplified parser for segment T (240) or type 1 (400)
-      lines.forEach((line, index) => {
-        // CNAB 240 - Segment T (payment details)
-        if (tipo === "cnab240" && line.length === 240) {
-          const codigoRegistro = line.substring(0, 1)
-          const codigoSegmento = line.substring(13, 14)
-          const codigoMovimento = line.substring(15, 17) // Used for payment method detection
-          const formaLancamento = line.substring(17, 18) // Used for payment method detection
+      console.log("[v0] Iniciando validação CNAB", tipo)
 
-          // Segmento T (Cobrança)
+      // Validate file structure
+      lines.forEach((line, index) => {
+        const lineNum = index + 1
+
+        if (tipo === "cnab240") {
+          // Validate line length
+          if (line.length !== 240) {
+            errosValidacao.push(`Linha ${lineNum}: Tamanho inválido (${line.length} caracteres, esperado 240)`)
+            return
+          }
+
+          const codigoRegistro = line.substring(7, 8)
+          const codigoSegmento = line.substring(13, 14)
+
+          // Validate registro type
+          if (codigoRegistro !== "3") {
+            return // Skip non-detail records
+          }
+
+          // Only process segment T
           if (codigoSegmento === "T") {
-            const valorNominal = Number.parseFloat(line.substring(77, 92).replace(/^0+/, "")) / 100
-            const valorPago = Number.parseFloat(line.substring(92, 107).replace(/^0+/, "")) / 100 // This is the actual paid amount
-            const dataPagamento = line.substring(137, 145)
+            // Validate numeric fields
+            const valorNominalStr = line.substring(81, 96)
+            const valorPagoStr = line.substring(96, 111)
+            const dataPagamento = line.substring(140, 148)
+            const cnpj = line.substring(18, 32).trim()
+
+            // Validate CNPJ format (14 digits)
+            if (cnpj && !/^\d{14}$/.test(cnpj)) {
+              errosValidacao.push(`Linha ${lineNum}: CNPJ inválido (${cnpj}) - deve ter 14 dígitos`)
+            }
+
+            // Validate date format (DDMMYYYY)
+            if (dataPagamento && !/^\d{8}$/.test(dataPagamento)) {
+              errosValidacao.push(`Linha ${lineNum}: Data inválida (${dataPagamento}) - formato esperado DDMMYYYY`)
+            }
+
+            // Validate numeric values
+            if (!/^\d+$/.test(valorNominalStr)) {
+              errosValidacao.push(`Linha ${lineNum}: Valor nominal inválido - deve ser numérico`)
+            }
+            if (!/^\d+$/.test(valorPagoStr)) {
+              errosValidacao.push(`Linha ${lineNum}: Valor pago inválido - deve ser numérico`)
+            }
+
+            const valorNominal = Number.parseFloat(valorNominalStr.replace(/^0+/, "")) / 100
+            const valorPago = Number.parseFloat(valorPagoStr.replace(/^0+/, "")) / 100
+
+            // Validate positive values
+            if (valorPago <= 0) {
+              errosValidacao.push(`Linha ${lineNum}: Valor pago deve ser maior que zero`)
+            }
+
             const dataFormatada =
               dataPagamento.length === 8
                 ? `${dataPagamento.substring(4, 8)}-${dataPagamento.substring(2, 4)}-${dataPagamento.substring(0, 2)}`
                 : new Date().toISOString().split("T")[0]
 
-            // Detect payment method from formaLancamento and codigoMovimento
+            const codigoMovimento = line.substring(15, 17)
+            const formaLancamento = line.substring(17, 18)
+
             let formaPagamentoCNAB: "pix" | "ted" | "boleto" | "transferencia" | "" = ""
             if (formaLancamento === "1" || codigoMovimento === "01") {
-              // Boleto
               formaPagamentoCNAB = "boleto"
             } else if (formaLancamento === "3" || formaLancamento === "41") {
-              // TED / DOC
               formaPagamentoCNAB = "ted"
             } else if (formaLancamento === "45" || formaLancamento === "47") {
-              // PIX
               formaPagamentoCNAB = "pix"
             } else if (formaLancamento === "48" || formaLancamento === "49") {
-              // Transferência (other types)
               formaPagamentoCNAB = "transferencia"
             }
 
             if (valorPago > 0) {
               pagamentos.push({
                 id: `cnab240-${Date.now()}-${index}`,
-                codigo: `CNAB240-${index}`, // Example code for imported CNAB240
+                codigo: `CNAB240-${index}`,
                 data: dataFormatada,
                 pagador: line.substring(33, 73).trim() || "Não identificado",
-                cnpj: line.substring(18, 32).trim(),
-                valor: valorPago, // Use the actual paid amount
-                valorEsperado: valorNominal, // Use nominal value as expected if available
+                cnpj: cnpj,
+                valor: valorPago,
+                valorEsperado: valorNominal,
                 canal: formaPagamentoCNAB.toUpperCase() || "CNAB240",
                 banco: line.substring(0, 3),
                 identificacao: line.substring(73, 93).trim() || fileName,
@@ -1715,44 +1755,91 @@ export function ConciliadorInteligente({
                   valorPago === valorNominal ? "conciliado" : valorPago > valorNominal ? "divergente" : "divergente",
                 tipo: valorPago === valorNominal ? "igual" : valorPago > valorNominal ? "valor_maior" : "valor_menor",
                 origem: "importacao",
-                formaPagamento: formaPagamentoCNAB, // Use detected formaPagamento
-                valorRecebido: valorPago, // Added for preview
+                formaPagamento: formaPagamentoCNAB,
+                valorRecebido: valorPago,
               })
             }
           }
-        }
-        // CNAB 400 - Record type 1
-        else if (tipo === "cnab400" && line.length === 400) {
+        } else if (tipo === "cnab400") {
+          // Validate line length
+          if (line.length !== 400) {
+            errosValidacao.push(`Linha ${lineNum}: Tamanho inválido (${line.length} caracteres, esperado 400)`)
+            return
+          }
+
           const tipoRegistro = line.substring(0, 1)
+
+          // Only process detail records (type 1)
           if (tipoRegistro === "1") {
-            const valor = Number.parseFloat(line.substring(152, 165).replace(/^0+/, "")) / 100
+            const valorStr = line.substring(152, 165)
             const dataPagamento = line.substring(110, 116)
+            const cnpj = line.substring(3, 17).trim()
+
+            // Validate CNPJ format (14 digits)
+            if (cnpj && !/^\d{14}$/.test(cnpj)) {
+              errosValidacao.push(`Linha ${lineNum}: CNPJ inválido (${cnpj}) - deve ter 14 dígitos`)
+            }
+
+            // Validate date format (DDMMYY)
+            if (dataPagamento && !/^\d{6}$/.test(dataPagamento)) {
+              errosValidacao.push(`Linha ${lineNum}: Data inválida (${dataPagamento}) - formato esperado DDMMYY`)
+            }
+
+            // Validate numeric value
+            if (!/^\d+$/.test(valorStr)) {
+              errosValidacao.push(`Linha ${lineNum}: Valor inválido - deve ser numérico`)
+            }
+
+            const valor = Number.parseFloat(valorStr.replace(/^0+/, "")) / 100
+
+            // Validate positive value
+            if (valor <= 0) {
+              errosValidacao.push(`Linha ${lineNum}: Valor deve ser maior que zero`)
+            }
+
             const dataFormatada =
               dataPagamento.length === 6
                 ? `20${dataPagamento.substring(4, 6)}-${dataPagamento.substring(2, 4)}-${dataPagamento.substring(0, 2)}`
                 : new Date().toISOString().split("T")[0]
+
             if (valor > 0) {
               pagamentos.push({
                 id: `cnab400-${Date.now()}-${index}`,
-                codigo: `CNAB400-${index}`, // Example code for imported CNAB400
+                codigo: `CNAB400-${index}`,
                 data: dataFormatada,
                 pagador: line.substring(34, 74).trim() || "Não identificado",
-                cnpj: line.substring(3, 17).trim(),
+                cnpj: cnpj,
                 valor: valor,
-                valorEsperado: 0, // CNAB 400 typically doesn't have expected value
+                valorEsperado: 0,
                 status: "excecao",
                 tipo: "identificacao_incorreta",
                 canal: "CNAB400",
                 banco: line.substring(76, 79),
                 identificacao: line.substring(110, 120).trim() || fileName,
                 origem: "importacao",
-                formaPagamento: "", // CNAB 400 might not explicitly provide formaPagamento
-                valorRecebido: valor, // Added for preview
+                formaPagamento: "",
+                valorRecebido: valor,
               })
             }
           }
         }
       })
+
+      if (errosValidacao.length > 0) {
+        const erroMsg = `Erros encontrados no arquivo CNAB:\n\n${errosValidacao.slice(0, 10).join("\n")}${
+          errosValidacao.length > 10 ? `\n\n... e mais ${errosValidacao.length - 10} erros` : ""
+        }`
+        alert(erroMsg)
+        console.error("[v0] Erros de validação CNAB:", errosValidacao)
+      }
+
+      console.log(
+        "[v0] Validação CNAB concluída:",
+        pagamentos.length,
+        "pagamentos processados,",
+        errosValidacao.length,
+        "erros encontrados",
+      )
     }
 
     // If no payments found, create sample for demo
