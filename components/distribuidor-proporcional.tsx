@@ -213,6 +213,7 @@ interface HistoricoEntry {
   valorRateado: number
   valorEmAberto: number
   valorLesado: number
+  credoresLesados: string[] // Names of credores who were affected by exclusion or rounding
   credoresParticipantes: number
   credoresExcluidos: number
 }
@@ -276,11 +277,11 @@ export function DistribuidorProporcional({
   const [showRelatorioConsolidado, setShowRelatorioConsolidado] = useState(false)
 
   useEffect(() => {
-    if (pagadorSelecionado && mapaLiquidacao.length > 0) {
-      const pagadorCodigo = pagadorSelecionado.split(/\s*[-–]\s*/)[0]
+    if (pagadorSelecionado && mapaLiquidacao.length > 0 && credoresBase.length > 0) {
+      const pagadorCodigo = pagadorSelecionado.split(/\s*[-—–]\s*/)[0]
 
       const mapaCredores = mapaLiquidacao.filter((m) => {
-        const mapaCodigo = m.pagadorCodigo.split(/\s*[-–]\s*/)[0]
+        const mapaCodigo = m.pagadorCodigo.split(/\s*[-—–]\s*/)[0]
         return mapaCodigo === pagadorCodigo
       })
 
@@ -289,9 +290,9 @@ export function DistribuidorProporcional({
       console.log("[v0] useEffect - credoresBase sample:", credoresBase.slice(0, 3))
 
       const novosCredores: Credor[] = mapaCredores.map((m, idx) => {
-        const credorCodigo = m.credorCodigo.split(/\s*[-–]\s*/)[0]
+        const credorCodigo = m.credorCodigo.split(/\s*[-—–]\s*/)[0]
         const credorBase = credoresBase.find((c) => {
-          const cCodigo = c.codigo.split(/\s*[-–]\s*/)[0]
+          const cCodigo = c.codigo.split(/\s*[-—–]\s*/)[0]
           return cCodigo === credorCodigo
         })
 
@@ -310,7 +311,7 @@ export function DistribuidorProporcional({
           id: `credor-${idx}`,
           codigo: credorCodigo,
           agente: credorBase?.agente || "",
-          nome: credorBase?.nome || m.credorCodigo.split(/\s*[-–]\s*/)[1] || m.credorCodigo,
+          nome: credorBase?.nome || m.credorCodigo.split(/\s*[-—–]\s*/)[1] || m.credorCodigo,
           documento: credorBase?.documento || "",
           banco: credorBase?.banco || "",
           agencia: credorBase?.agencia || "",
@@ -436,6 +437,7 @@ export function DistribuidorProporcional({
 
     const resultadoDistribuicao: Distribuicao[] = []
     let valorTotalPago = 0
+    const credoresLesadosNaDistribuicao: string[] = []
 
     // Add valid creditors with their distribution
     for (const credor of credoresComRateioValido) {
@@ -469,6 +471,7 @@ export function DistribuidorProporcional({
         saldoRemanescente: valorDevido,
         status: valorDevido <= 0 ? "quitado" : "mínimo",
       })
+      if (valorDevido > 0) credoresLesadosNaDistribuicao.push(credor.nome)
     }
 
     // Add excluded creditors (below minimum or don't accept partial)
@@ -483,6 +486,7 @@ export function DistribuidorProporcional({
         saldoRemanescente: valorDevido,
         status: valorDevido <= 0 ? "quitado" : valorDevido < minimo ? "mínimo" : "excluido",
       })
+      if (valorDevido > 0) credoresLesadosNaDistribuicao.push(credor.nome)
     }
 
     // Calculate percentages based on valorRateado
@@ -528,6 +532,10 @@ export function DistribuidorProporcional({
         if (credorParaAjuste.saldoRemanescente > 0) {
           credorParaAjuste.status = "parcial"
         }
+        // Add to lesados if not already there from exclusion or minimum
+        if (!credoresLesadosNaDistribuicao.includes(credorParaAjuste.nome)) {
+          credoresLesadosNaDistribuicao.push(credorParaAjuste.nome)
+        }
 
         setErroRateio(
           `Aviso: Devido ao arredondamento bancário, o credor "${credorParaAjuste.nome}" terá R$ ${formatToBrazilian(excedente)} deduzido do seu rateio, ficando como valor a pagar posteriormente.`,
@@ -568,7 +576,7 @@ export function DistribuidorProporcional({
       return
     }
     // Allow confirmation even with warning message (erroRateio that starts with "Aviso:")
-    if (erroRateio && !erroRateio.startsWith("Aviso:")) return
+    if (erroRateio && !erroRateio.startsWith("Aviso:") && !erroRateio.startsWith("Warning:")) return
 
     const pagadorNome = pagadorSelecionado || "Não selecionado"
 
@@ -576,16 +584,29 @@ export function DistribuidorProporcional({
       .filter((d) => d.status === "mínimo" || d.status === "excluido")
       .reduce((sum, d) => sum + d.valorDevido, 0)
 
-    // Check if there was a rounding adjustment warning
-    const valorArredondamento = erroRateio?.startsWith("Aviso:") ? resultado.valorLesado : 0
+    const credoresLesados: string[] = []
 
-    const valorLesadoTotal = arredondamentoBancario(valorLesadoExcluidos + valorArredondamento)
+    // Add credores who were excluded or below minimum
+    distribuicao
+      .filter((d) => d.status === "mínimo" || d.status === "excluido")
+      .forEach((d) => credoresLesados.push(d.nome))
+
+    // Check if there was a rounding adjustment warning
+    const valorArredondamento =
+      erroRateio?.startsWith("Aviso:") || erroRateio?.startsWith("Warning:") ? resultado.valorLesado : 0
+
+    if (valorArredondamento > 0 && erroRateio) {
+      const match = erroRateio.match(/"([^"]+)"/)
+      if (match && match[1] && !credoresLesados.includes(match[1])) {
+        credoresLesados.push(match[1])
+      }
+    }
 
     const novoHistorico: HistoricoEntry = {
-      data: new Date().toLocaleString("pt-BR"),
-      dataPagamento: dataPagamento || new Date().toISOString().split("T")[0],
+      data: new Date().toISOString(), // CHANGE changed to ISO string
+      dataPagamento,
       pagador: pagadorNome,
-      valorTotalDevido: totalDevido,
+      valorTotalDevido: distribuicao.reduce((sum, d) => sum + d.valorDevido, 0),
       valoresParciaisDevidos: distribuicao.map((d) => ({
         nome: d.nome,
         valor: d.valorDevido,
@@ -593,7 +614,8 @@ export function DistribuidorProporcional({
       })),
       valorRateado: resultado.valorDistribuido,
       valorEmAberto: resultado.valorSobra,
-      valorLesado: valorLesadoTotal,
+      valorLesado: valorLesadoExcluidos + valorArredondamento,
+      credoresLesados, // Store who was affected
       credoresParticipantes: resultado.credoresParticipantes,
       credoresExcluidos: resultado.credoresExcluidos,
     }
@@ -1078,9 +1100,11 @@ export function DistribuidorProporcional({
 
       {erroRateio && (
         <div
-          className={`p-3 rounded-md ${erroRateio.startsWith("Aviso:") ? "bg-yellow-50 border border-yellow-200" : "bg-red-50 border border-red-200"}`}
+          className={`p-3 rounded-md ${erroRateio.startsWith("Aviso:") || erroRateio.startsWith("Warning:") ? "bg-yellow-50 border border-yellow-200" : "bg-red-50 border border-red-200"}`}
         >
-          <p className={`text-sm ${erroRateio.startsWith("Aviso:") ? "text-yellow-700" : "text-red-600"}`}>
+          <p
+            className={`text-sm ${erroRateio.startsWith("Aviso:") || erroRateio.startsWith("Warning:") ? "text-yellow-700" : "text-red-600"}`}
+          >
             {erroRateio}
           </p>
         </div>
@@ -1088,7 +1112,7 @@ export function DistribuidorProporcional({
 
       {/* Resultado da Distribuição */}
       {/* CHANGE Allow showing result when there's a warning (erroRateio starts with "Aviso:") */}
-      {resultado && (!erroRateio || erroRateio.startsWith("Aviso:")) && (
+      {resultado && (!erroRateio || erroRateio.startsWith("Aviso:") || erroRateio.startsWith("Warning:")) && (
         <Card>
           <CardHeader>
             <CardTitle>Resultado da Distribuição</CardTitle>
@@ -1257,6 +1281,16 @@ export function DistribuidorProporcional({
                     <p className="text-xl font-bold text-red-600">
                       R$ {formatToBrazilian(relatorioSelecionado.valorLesado)}
                     </p>
+                    {relatorioSelecionado.credoresLesados && relatorioSelecionado.credoresLesados.length > 0 && (
+                      <div className="mt-2 pt-2 border-t">
+                        <p className="text-xs text-muted-foreground mb-1">Credores Afetados:</p>
+                        {relatorioSelecionado.credoresLesados.map((nome, i) => (
+                          <p key={i} className="text-sm text-red-600">
+                            {nome}
+                          </p>
+                        ))}
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
                 <Card>
@@ -1294,6 +1328,25 @@ export function DistribuidorProporcional({
                   </Table>
                 </CardContent>
               </Card>
+              {relatorioSelecionado.credoresLesados && relatorioSelecionado.credoresLesados.length > 0 && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg">Credores Lesados</CardTitle>
+                    <CardDescription>
+                      Credores cujos valores foram afetados por exclusão, valor mínimo ou ajuste de arredondamento.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex flex-wrap gap-2">
+                      {relatorioSelecionado.credoresLesados.map((credorNome, i) => (
+                        <Badge key={i} variant="destructive" className="text-xs px-3 py-1">
+                          {credorNome}
+                        </Badge>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
             </div>
           )}
         </DialogContent>
@@ -1340,6 +1393,7 @@ export function DistribuidorProporcional({
                         <TableHead className="text-right">Saldo</TableHead>
                         <TableHead className="text-right">Sobra</TableHead>
                         <TableHead className="text-right">Lesado</TableHead>
+                        <TableHead>Credores Lesados</TableHead>
                         <TableHead className="text-center">Credores</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -1363,9 +1417,20 @@ export function DistribuidorProporcional({
                           <TableCell className="text-right text-red-600">
                             R$ {formatToBrazilian(entry.valorLesado)}
                           </TableCell>
-                          <TableCell className="text-center">
-                            {entry.credoresParticipantes} / {entry.credoresParticipantes + entry.credoresExcluidos}
+                          <TableCell className="max-w-xs">
+                            {entry.credoresLesados && entry.credoresLesados.length > 0 ? (
+                              <div className="text-sm">
+                                {entry.credoresLesados.map((nome, i) => (
+                                  <div key={i} className="text-red-600 truncate" title={nome}>
+                                    {nome}
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="text-muted-foreground">-</span>
+                            )}
                           </TableCell>
+                          <TableCell className="text-center">{entry.credoresParticipantes}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
