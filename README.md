@@ -23,3 +23,7 @@ Sistema de conciliação financeira para gestão de pagamentos, mapas de liquida
 Projeto disponível em:
 
 **[https://vercel.com/thiagovespas-projects/v0-financial-platform-interface](https://vercel.com/thiagovespas-projects/v0-financial-platform-interface)**
+
+
+## API de Pagamentos
+O campo banco passou a ser obrigatório nas requisições.
