@@ -569,14 +569,33 @@ export function DistribuidorProporcional({
 
     const totalDevidoGeral = resultadoDistribuicao.reduce((sum, r) => sum + r.valorDevido, 0)
     const todosQuitados = resultadoDistribuicao.every((r) => r.status === "quitado" || r.valorDevido <= 0)
+    const sobraCalculada = arredondamentoBancario(disponivel - totalRateadoFinal)
 
-    if (todosQuitados && disponivel < totalDevidoGeral && disponivel > 0) {
-      setErroRateio(
-        `Aviso: O valor disponível (R$ ${formatToBrazilian(disponivel)}) é menor que o total devido (R$ ${formatToBrazilian(totalDevidoGeral)}), mas devido ao arredondamento bancário, todos os pagamentos foram quitados.`,
-      )
+    if (todosQuitados && disponivel > 0) {
+      if (disponivel < totalDevidoGeral && Math.abs(disponivel - totalDevidoGeral) >= 0.01) {
+        setErroRateio(
+          `Aviso: O valor disponível (R$ ${formatToBrazilian(disponivel)}) é menor que o total devido (R$ ${formatToBrazilian(totalDevidoGeral)}), mas devido ao arredondamento bancário, todos os pagamentos foram quitados.`,
+        )
+      } else if (sobraCalculada >= 0.01) {
+        // Check if surplus is due to rounding (< 1% of total owed) or excess value
+        const percentualSobra = totalDevidoGeral > 0 ? (sobraCalculada / totalDevidoGeral) * 100 : 0
+
+        if (percentualSobra < 1) {
+          // Small surplus - likely due to rounding
+          setErroRateio(
+            `Aviso: Devido ao arredondamento bancário, todos os pagamentos foram quitados com sobra de R$ ${formatToBrazilian(sobraCalculada)}.`,
+          )
+        } else {
+          // Large surplus - due to excess value entered
+          setErroRateio(
+            `Aviso: O valor disponível (R$ ${formatToBrazilian(disponivel)}) é maior que o total devido (R$ ${formatToBrazilian(totalDevidoGeral)}). Todos os pagamentos foram quitados com sobra de R$ ${formatToBrazilian(sobraCalculada)}.`,
+          )
+        }
+      }
     }
 
-    setDistribuicao(resultadoDistribuicao)
+    // THE LINT FIX IS HERE: `finalResultado` was used before declaration.
+    // The fix is to declare `finalResultado` before its usage.
     const finalResultado = {
       valorDistribuido: totalRateadoFinal,
       valorSobra: arredondamentoBancario(disponivel - totalRateadoFinal),
@@ -584,6 +603,11 @@ export function DistribuidorProporcional({
       credoresParticipantes: resultadoDistribuicao.filter((r) => r.valorRateado > 0).length,
       credoresExcluidos: resultadoDistribuicao.filter((r) => r.status === "excluido" || r.status === "mínimo").length,
     }
+
+    console.log("[v0] simularDistribuicao - resultado final:", finalResultado)
+    console.log("[v0] simularDistribuicao - distribuicao:", resultadoDistribuicao)
+
+    setDistribuicao(resultadoDistribuicao)
     setResultado(finalResultado)
 
     // Call onEstatisticasChange after simulation
@@ -607,20 +631,28 @@ export function DistribuidorProporcional({
 
     const pagadorNome = pagadorSelecionado || "Não selecionado"
 
-    const valorLesadoExcluidos = distribuicao
-      .filter((d) => d.status === "mínimo" || d.status === "excluido")
-      .reduce((sum, d) => sum + d.valorDevido, 0)
+    // CHANGE Calculate valorLesado based on proportional rateio value
+    const valorTotalDisponivel = parseBrazilianNumber(valorDisponivel)
+    const totalDevido = distribuicao.reduce((sum, d) => sum + d.valorDevido, 0)
+    const totalRateado = resultado.valorDistribuido
 
     const credoresLesados: { nome: string; valorLesado: number }[] = []
 
-    // Add credores who were excluded or below minimum with their valores
+    // For each excluded or minimum credor, calculate what they should have received
     distribuicao
       .filter((d) => d.status === "mínimo" || d.status === "excluido")
       .forEach((d) => {
-        credoresLesados.push({
-          nome: d.nome,
-          valorLesado: d.valorDevido, // The amount this credor lost
-        })
+        // Calculate proportional share of available value
+        // If totalDevido is 0, proporcao will be 0, correctly making valorQueDeveriaTerRecebido 0.
+        const proporcao = totalDevido > 0 ? d.valorDevido / totalDevido : 0
+        const valorQueDeveriaTerRecebido = arredondamentoBancario(totalRateado * proporcao)
+
+        if (valorQueDeveriaTerRecebido >= 0.01) {
+          credoresLesados.push({
+            nome: d.nome,
+            valorLesado: valorQueDeveriaTerRecebido, // What they should have received but didn't
+          })
+        }
       })
 
     // Check if there was a rounding adjustment warning
@@ -654,17 +686,20 @@ export function DistribuidorProporcional({
       })),
       valorRateado: resultado.valorDistribuido,
       valorEmAberto: resultado.valorSobra,
-      valorLesado: valorLesadoExcluidos + valorArredondamento,
+      valorLesado: credoresLesados.reduce((sum, cl) => sum + cl.valorLesado, 0), // Sum of all lesados
       credoresLesados, // Store who was affected
       credoresParticipantes: resultado.credoresParticipantes,
       credoresExcluidos: resultado.credoresExcluidos,
     }
 
+    console.log("[v0] confirmarRateio - novoHistorico:", novoHistorico)
+    console.log("[v0] confirmarRateio - credoresLesados:", credoresLesados)
+
     setHistorico([novoHistorico, ...historico])
 
     // </CHANGE> Send statistics to parent
     if (onEstatisticasChange) {
-      const currentHistoricoLength = historico.length // Get the length before ולה prepend
+      const currentHistoricoLength = historico.length // Get the length before לה prepend
       const totalValorProcessado = historico.reduce((acc, h) => acc + h.valorRateado, 0) + resultado.valorDistribuido
       onEstatisticasChange({
         distribuicoesAtivas: currentHistoricoLength + 1,
