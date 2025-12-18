@@ -1584,10 +1584,23 @@ export function DistribuidorProporcional({
                         const credorTotals: Record<string, { devido: number; rateado: number; participacoes: number }> =
                           {}
                         historico.forEach((h) => {
+                          console.log("[v0] Processing historico entry:", {
+                            pagador: h.pagador,
+                            valorRateado: h.valorRateado,
+                            valoresParciaisDevidos: h.valoresParciaisDevidos,
+                          })
                           h.valoresParciaisDevidos.forEach((v) => {
                             if (!credorTotals[v.nome]) {
                               credorTotals[v.nome] = { devido: 0, rateado: 0, participacoes: 0 }
                             }
+                            console.log(
+                              "[v0] Adding to credor:",
+                              v.nome,
+                              "valorRateado:",
+                              v.valorRateado,
+                              "valor:",
+                              v.valor,
+                            )
                             credorTotals[v.nome].devido += v.valor
                             credorTotals[v.nome].rateado += v.valorRateado
                             if (v.valorRateado > 0) {
@@ -1595,6 +1608,7 @@ export function DistribuidorProporcional({
                             }
                           })
                         })
+                        console.log("[v0] Final credorTotals:", credorTotals)
                         return Object.entries(credorTotals)
                           .sort((a, b) => b[1].rateado - a[1].rateado)
                           .map(([nome, totals], i) => (
