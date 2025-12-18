@@ -1574,7 +1574,8 @@ export function DistribuidorProporcional({
                       <TableRow>
                         <TableHead>Credor</TableHead>
                         <TableHead className="text-right">Valor Devido</TableHead>
-                        <TableHead className="text-center bg-primary/10">Participações</TableHead>
+                        <TableHead className="text-right bg-primary/10 font-bold text-primary">Valor Rateado</TableHead>
+                        <TableHead className="text-center">Participações</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -1600,6 +1601,9 @@ export function DistribuidorProporcional({
                             <TableRow key={i}>
                               <TableCell>{nome}</TableCell>
                               <TableCell className="text-right">R$ {formatToBrazilian(totals.devido)}</TableCell>
+                              <TableCell className="text-right bg-primary/10 font-bold text-primary">
+                                R$ {formatToBrazilian(totals.rateado)}
+                              </TableCell>
                               <TableCell className="text-center">{totals.participacoes}</TableCell>
                             </TableRow>
                           ))
