@@ -447,6 +447,11 @@ export function DistribuidorProporcional({
     console.log("[v0] simularDistribuicao - credoresComRateioValido:", credoresComRateioValido.length)
     console.log("[v0] simularDistribuicao - credoresComRateioMinimo:", credoresComRateioMinimo.length)
 
+    if (credoresComRateioMinimo.length > 0 && disponivel < totalDevidoFinal * 0.01) {
+      const msg = `Aviso: O valor disponível (R$ ${formatToBrazilian(disponivel)}) é muito pequeno comparado ao total devido (R$ ${formatToBrazilian(totalDevidoFinal)}). ${credoresComRateioMinimo.length} ${credoresComRateioMinimo.length === 1 ? "credor" : "credores"} ${credoresComRateioMinimo.length === 1 ? "foi excluído" : "foram excluídos"} porque ${credoresComRateioMinimo.length === 1 ? "receberia" : "receberiam"} menos que o mínimo bancário de R$ 0,01.`
+      setErroRateio(msg)
+    }
+
     // Step 5: Recalculate distribution only for valid creditors
     const totalDevidoValido = credoresComRateioValido.reduce((sum, c) => sum + getValorDevido(c), 0)
     const valorADistribuirFinal = Math.min(disponivel, totalDevidoValido)
